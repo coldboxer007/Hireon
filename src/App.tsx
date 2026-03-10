@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppState, PrepData, ReportData } from './types';
+import { AppState, PrepData, ReportData, InterviewSnapshot } from './types';
 import InputScreen from './components/InputScreen';
 import ResearchScreen from './components/ResearchScreen';
 import PrepPackScreen from './components/PrepPackScreen';
@@ -14,6 +14,7 @@ export default function App() {
   const [prepData, setPrepData] = useState<PrepData | null>(null);
   const [interviewVideo, setInterviewVideo] = useState<Blob | null>(null);
   const [interviewTranscript, setInterviewTranscript] = useState<string>('');
+  const [interviewSnapshots, setInterviewSnapshots] = useState<InterviewSnapshot[]>([]);
   const [reportData, setReportData] = useState<ReportData | null>(null);
 
   const handleInputComplete = (resume: File, jd: File | string) => {
@@ -31,9 +32,10 @@ export default function App() {
     setAppState('MOCK_INTERVIEW');
   };
 
-  const handleInterviewComplete = (video: Blob, transcript: string) => {
+  const handleInterviewComplete = (video: Blob, transcript: string, snapshots: InterviewSnapshot[]) => {
     setInterviewVideo(video);
     setInterviewTranscript(transcript);
+    setInterviewSnapshots(snapshots);
     setAppState('ANALYZING');
   };
 
@@ -48,7 +50,8 @@ export default function App() {
     setJdFile(null);
     setPrepData(null);
     setInterviewVideo(null);
-    setInterviewTranscript(null);
+    setInterviewTranscript('');
+    setInterviewSnapshots([]);
     setReportData(null);
   };
 
@@ -81,6 +84,7 @@ export default function App() {
           prepData={prepData}
           video={interviewVideo}
           transcript={interviewTranscript}
+          snapshots={interviewSnapshots}
           onComplete={handleAnalysisComplete} 
         />
       )}

@@ -1,415 +1,671 @@
-import { useEffect, useRef, useState } from 'react';
-import { motion } from 'motion/react';
-import { Mic, MicOff, Video, VideoOff, Square, Activity } from 'lucide-react';
-import { PrepData } from '../types';
-import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Mic, MicOff, Video, VideoOff, Square,
+  Send, Bot, User, Camera, Radio, Shield,
+} from 'lucide-react';
+import { PrepData, InterviewSnapshot } from '../types';
+import { io, Socket } from 'socket.io-client';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+/* ── PCM <-> Base64 helpers ──────────────────────────────────────────────── */
+function float32ToBase64_16k(float32: Float32Array): string {
+  const int16 = new Int16Array(float32.length);
+  for (let i = 0; i < float32.length; i++) {
+    int16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32767)));
+  }
+  const bytes = new Uint8Array(int16.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToFloat32(base64: string): Float32Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const int16 = new Int16Array(bytes.buffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+  return float32;
+}
+
+/* ── Constants ───────────────────────────────────────────────────────────── */
+const SONIC_SERVER_URL = 'http://localhost:3001';
 
 interface MockInterviewScreenProps {
   prepData: PrepData;
-  onComplete: (video: Blob, transcript: string) => void;
+  onComplete: (video: Blob, transcript: string, snapshots: InterviewSnapshot[]) => void;
+}
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  id: string;
+}
+
+let msgIdCounter = 0;
+function nextMsgId() {
+  return 'msg-' + (++msgIdCounter);
 }
 
 export default function MockInterviewScreen({ prepData, onComplete }: MockInterviewScreenProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [transcript, setTranscript] = useState<string>('');
-  const [partialTranscript, setPartialTranscript] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [aiHasText, setAiHasText] = useState(false); // true once first text chunk of current turn arrives
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
-  const [aiSpeaking, setAiSpeaking] = useState(false);
+  const [interviewEnded, setInterviewEnded] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [snapshotCount, setSnapshotCount] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameIdRef = useRef<number>(0);
-  const currentSpeakerRef = useRef<'AI' | 'User' | null>(null);
-  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  /* Snapshot refs */
+  const snapshotsRef = useRef<InterviewSnapshot[]>([]);
+  const snapshotIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const interviewStartTimeRef = useRef<number>(0);
+  const elapsedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /* Audio refs */
+  const socketRef = useRef<Socket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const sessionRef = useRef<any>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micEnabledRef = useRef(true);
+  const messagesRef = useRef<Message[]>([]);
+
+  /* Gapless audio playback */
+  const playbackContextRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const drainScheduledRef = useRef(false);
+
+  /* Transcript role tracking */
+  const contentRoleMapRef = useRef<Map<string, 'user' | 'assistant'>>(new Map());
+  const currentAssistantTextRef = useRef('');
+  const currentUserTextRef = useRef('');
+  const currentAssistantMsgIdRef = useRef<string | null>(null);
+  const currentUserMsgIdRef = useRef<string | null>(null);
+
+  useEffect(() => { micEnabledRef.current = micEnabled; }, [micEnabled]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   useEffect(() => {
-    // Initialize webcam
     const initMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
+        if (videoRef.current) videoRef.current.srcObject = stream;
       } catch (err) {
-        console.error("Failed to get media devices", err);
+        console.error('Failed to get media devices', err);
       }
     };
     initMedia();
-
-    return () => {
-      stopEverything();
-    };
+    return () => { stopEverything(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const stopEverything = () => {
-    if (animationFrameIdRef.current) {
-      cancelAnimationFrame(animationFrameIdRef.current);
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close();
-    }
-    if (sessionRef.current) {
-      sessionRef.current.close();
-    }
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-    }
-  };
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isAiSpeaking]);
 
+  const stopEverything = useCallback(() => {
+    if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+    if (snapshotIntervalRef.current) { clearInterval(snapshotIntervalRef.current); snapshotIntervalRef.current = null; }
+    if (elapsedIntervalRef.current) { clearInterval(elapsedIntervalRef.current); elapsedIntervalRef.current = null; }
+    if (sourceNodeRef.current) { try { sourceNodeRef.current.disconnect(); } catch {} sourceNodeRef.current = null; }
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') { audioContextRef.current.close(); audioContextRef.current = null; }
+    if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') { playbackContextRef.current.close(); playbackContextRef.current = null; }
+    if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; }
+  }, []);
+
+  /* ── Gapless audio playback (24 kHz) ─────────────────────────────────── */
+  const drainAudioQueue = useCallback(() => {
+    const ctx = playbackContextRef.current;
+    if (!ctx || audioQueueRef.current.length === 0) { drainScheduledRef.current = false; return; }
+    while (audioQueueRef.current.length > 0) {
+      const samples = audioQueueRef.current.shift()!;
+      const buffer = ctx.createBuffer(1, samples.length, 24000);
+      buffer.getChannelData(0).set(samples);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      const now = ctx.currentTime;
+      if (nextPlayTimeRef.current <= now) nextPlayTimeRef.current = now + 0.005;
+      src.start(nextPlayTimeRef.current);
+      nextPlayTimeRef.current += buffer.duration;
+    }
+    drainScheduledRef.current = false;
+  }, []);
+
+  const enqueueAudio = useCallback((b64: string) => {
+    audioQueueRef.current.push(base64ToFloat32(b64));
+    if (!drainScheduledRef.current) { drainScheduledRef.current = true; queueMicrotask(drainAudioQueue); }
+  }, [drainAudioQueue]);
+
+  /* ── Start interview ───────────────────────────────────────────────── */
   const startInterview = async () => {
     if (!streamRef.current) return;
-    
     setIsConnecting(true);
+    setConnectionError(null);
     recordedChunksRef.current = [];
-    
-    // Compress video by drawing to a smaller canvas
+    snapshotsRef.current = [];
+    interviewStartTimeRef.current = Date.now();
+    setElapsed(0);
+    contentRoleMapRef.current.clear();
+
+    elapsedIntervalRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - interviewStartTimeRef.current) / 1000));
+    }, 1000);
+
     const canvas = document.createElement('canvas');
-    canvas.width = 320;
-    canvas.height = 240;
-    const ctx = canvas.getContext('2d');
-    
+    canvas.width = 320; canvas.height = 240;
+    const ctx2d = canvas.getContext('2d');
     const drawFrame = () => {
-      if (videoRef.current && ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      }
+      if (videoRef.current && ctx2d) ctx2d.drawImage(videoRef.current, 0, 0, 320, 240);
       animationFrameIdRef.current = requestAnimationFrame(drawFrame);
     };
     drawFrame();
 
-    const canvasStream = canvas.captureStream(15); // 15 fps
+    const canvasStream = canvas.captureStream(15);
     const audioTrack = streamRef.current.getAudioTracks()[0];
-    if (audioTrack) {
-      canvasStream.addTrack(audioTrack);
-    }
+    if (audioTrack) canvasStream.addTrack(audioTrack);
 
     let mediaRecorder: MediaRecorder;
-    try {
-      mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' });
-    } catch (e) {
-      console.warn('Failed to create MediaRecorder with canvas stream, falling back to original stream', e);
-      mediaRecorder = new MediaRecorder(streamRef.current, { mimeType: 'video/webm' });
-    }
-    
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        recordedChunksRef.current.push(e.data);
-      }
-    };
+    try { mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' }); }
+    catch { mediaRecorder = new MediaRecorder(streamRef.current, { mimeType: 'video/webm' }); }
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunksRef.current.push(e.data); };
     mediaRecorder.onstop = () => {
       const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-      onComplete(blob, transcript);
+      const transcript = messagesRef.current.map(m => (m.role === 'assistant' ? 'AI' : 'You') + ': ' + m.content).join('\n\n');
+      onComplete(blob, transcript, snapshotsRef.current);
     };
     mediaRecorderRef.current = mediaRecorder;
     mediaRecorder.start(1000);
 
-    // Setup AudioContext for Live API
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+    const snapCanvas = document.createElement('canvas');
+    snapCanvas.width = 480; snapCanvas.height = 360;
+    const snapCtx = snapCanvas.getContext('2d');
+    snapshotIntervalRef.current = setInterval(() => {
+      if (videoRef.current && snapCtx && videoRef.current.readyState >= 2) {
+        snapCtx.drawImage(videoRef.current, 0, 0, 480, 360);
+        const b64 = snapCanvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+        const sec = Math.round((Date.now() - interviewStartTimeRef.current) / 1000);
+        snapshotsRef.current.push({ base64: b64, timestamp: sec });
+        setSnapshotCount(snapshotsRef.current.length);
+      }
+    }, 20_000);
+
+    playbackContextRef.current = new AudioContext({ sampleRate: 24000 });
+    nextPlayTimeRef.current = 0;
+    // Resume immediately (we're inside a click handler — user gesture)
+    playbackContextRef.current.resume();
+
+    const socket = io(SONIC_SERVER_URL, { transports: ['websocket'], timeout: 15000 });
+    socketRef.current = socket;
+
+    const systemPrompt =
+      'You are an expert technical interviewer conducting a mock interview for the role of ' + prepData.roleTitle + ' at ' + prepData.companyName + '. ' +
+      'The candidate strengths are: ' + (prepData.fitMap?.strengths?.join(', ') || 'not specified') + '. ' +
+      'Their gaps are: ' + (prepData.fitMap?.gaps?.join(', ') || 'not specified') + '. ' +
+      'Conduct a realistic interview. Start by briefly introducing yourself and asking your first question. ' +
+      'IMPORTANT: Ask only ONE question at a time and then WAIT for the candidate to respond before asking the next question. ' +
+      'Do NOT ask multiple questions at once. Listen to their answer, give brief feedback if appropriate, then ask the next question. ' +
+      'Keep your responses short — generally two or three sentences. ' +
+      'After 3-4 questions total, wrap up the interview by saying "Thank you, that concludes our interview."';
+
+    socket.on('connect', () => { socket.emit('startSession', { systemPrompt }); });
+    socket.on('connect_error', (err) => { setIsConnecting(false); setConnectionError('Cannot connect to Sonic server (' + err.message + ')'); });
+
+    socket.on('sessionReady', () => {
+      setIsConnecting(false);
+      setIsRecording(true);
+      // Resume AudioContext (required after user gesture in browsers)
+      playbackContextRef.current?.resume();
+      startAudioCapture(socket);
+    });
+
+    socket.on('contentStart', (data: { role?: string; contentName?: string }) => {
+      const role = data?.role;
+      const cn = data?.contentName;
+      if (cn && role) contentRoleMapRef.current.set(cn, role === 'ASSISTANT' ? 'assistant' : 'user');
+      if (role === 'ASSISTANT') {
+        currentAssistantTextRef.current = '';
+        currentAssistantMsgIdRef.current = null; // defer bubble creation until first text
+        setIsAiSpeaking(true);
+        setAiHasText(false); // show typing dots
+      } else if (role === 'USER') {
+        currentUserTextRef.current = '';
+        currentUserMsgIdRef.current = null; // defer bubble creation until first text
+      }
+    });
+
+    socket.on('textOutput', (data: { content?: string; role?: string; contentName?: string }) => {
+      const text = data?.content || '';
+      if (!text) return;
+      let role: 'user' | 'assistant' | null = null;
+      if (data?.role === 'ASSISTANT') role = 'assistant';
+      else if (data?.role === 'USER') role = 'user';
+      else if (data?.contentName) role = contentRoleMapRef.current.get(data.contentName) || null;
+
+      if (role === 'assistant') {
+        currentAssistantTextRef.current += text;
+        const full = currentAssistantTextRef.current;
+        let tid = currentAssistantMsgIdRef.current;
+        if (!tid) {
+          // First text chunk — create the bubble now (no empty bubble)
+          tid = nextMsgId();
+          currentAssistantMsgIdRef.current = tid;
+          setAiHasText(true); // hide typing dots
+          setMessages(prev => [...prev, { role: 'assistant', content: full, id: tid! }]);
+        } else {
+          setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: full } : m));
+        }
+      } else if (role === 'user') {
+        currentUserTextRef.current += text;
+        const full = currentUserTextRef.current;
+        let tid = currentUserMsgIdRef.current;
+        if (!tid) {
+          tid = nextMsgId();
+          currentUserMsgIdRef.current = tid;
+          setMessages(prev => [...prev, { role: 'user', content: full, id: tid! }]);
+        } else {
+          setMessages(prev => prev.map(m => m.id === tid ? { ...m, content: full } : m));
+        }
+      }
+    });
+
+    socket.on('audioOutput', (data: { content?: string }) => { if (data?.content) enqueueAudio(data.content); });
+
+    socket.on('contentEnd', (data: { role?: string; contentName?: string }) => {
+      if (data?.contentName) contentRoleMapRef.current.delete(data.contentName);
+      if (data?.role === 'ASSISTANT') {
+        currentAssistantMsgIdRef.current = null;
+        setIsAiSpeaking(false);
+        if (currentAssistantTextRef.current.toLowerCase().includes('concludes our interview')) {
+          setInterviewEnded(true);
+          setTimeout(() => endInterview(), 3000);
+        }
+      } else if (data?.role === 'USER') { currentUserMsgIdRef.current = null; }
+    });
+
+    socket.on('error', (data: { message?: string }) => { setConnectionError(data?.message || 'Unknown server error'); });
+  };
+
+  const startAudioCapture = (socket: Socket) => {
+    if (!streamRef.current) return;
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
     audioContextRef.current = audioCtx;
-    nextPlayTimeRef.current = audioCtx.currentTime;
-
     const source = audioCtx.createMediaStreamSource(streamRef.current);
-    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    sourceNodeRef.current = source;
+    const processor = audioCtx.createScriptProcessor(1024, 1, 1);
     processorRef.current = processor;
-
+    processor.onaudioprocess = (e) => {
+      if (!micEnabledRef.current) return;
+      const inp = e.inputBuffer.getChannelData(0);
+      const copy = new Float32Array(inp.length);
+      copy.set(inp);
+      socket.emit('audioChunk', float32ToBase64_16k(copy));
+    };
     source.connect(processor);
     processor.connect(audioCtx.destination);
+  };
 
-    try {
-      const sessionPromise = ai.live.connect({
-        model: "gemini-2.5-flash-native-audio-preview-09-2025",
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
-          },
-          systemInstruction: `You are an expert technical interviewer for the role of ${prepData.roleTitle} at ${prepData.companyName}. 
-          The candidate's strengths are: ${prepData.fitMap?.strengths?.join(', ') || 'None provided'}.
-          Their gaps are: ${prepData.fitMap?.gaps?.join(', ') || 'None provided'}.
-          Conduct a realistic, high-stakes mock interview. Ask 3-4 questions based on their profile and the role.
-          If they do well, end the interview gracefully by saying "Thank you, that concludes our interview."
-          Keep your responses concise.`,
-          inputAudioTranscription: { },
-          outputAudioTranscription: { },
-        },
-        callbacks: {
-          onopen: () => {
-            setIsConnecting(false);
-            setIsRecording(true);
-            
-            // Send audio chunks
-            processor.onaudioprocess = (e) => {
-              if (!micEnabled) return;
-              const inputData = e.inputBuffer.getChannelData(0);
-              // Convert Float32 to Int16
-              const pcm16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-              }
-              // Convert to Base64
-              const buffer = new ArrayBuffer(pcm16.length * 2);
-              const view = new DataView(buffer);
-              for (let i = 0; i < pcm16.length; i++) {
-                view.setInt16(i * 2, pcm16[i], true);
-              }
-              const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-              
-              sessionPromise.then(session => {
-                session.sendRealtimeInput({
-                  media: { data: base64, mimeType: 'audio/pcm;rate=16000' }
-                });
-              });
-            };
-          },
-          onmessage: (message: LiveServerMessage) => {
-            // Handle Audio Output
-            const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64Audio) {
-              setAiSpeaking(true);
-              const binaryStr = atob(base64Audio);
-              const len = binaryStr.length;
-              const bytes = new Uint8Array(len);
-              for (let i = 0; i < len; i++) {
-                bytes[i] = binaryStr.charCodeAt(i);
-              }
-              const pcm16 = new Int16Array(bytes.buffer);
-              const float32 = new Float32Array(pcm16.length);
-              for (let i = 0; i < pcm16.length; i++) {
-                float32[i] = pcm16[i] / 0x7FFF;
-              }
-              
-              const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000);
-              audioBuffer.getChannelData(0).set(float32);
-              
-              const source = audioCtx.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(audioCtx.destination);
-              
-              const playTime = Math.max(audioCtx.currentTime, nextPlayTimeRef.current);
-              source.start(playTime);
-              nextPlayTimeRef.current = playTime + audioBuffer.duration;
-              
-              source.onended = () => {
-                if (audioCtx.currentTime >= nextPlayTimeRef.current - 0.1) {
-                  setAiSpeaking(false);
-                }
-              };
-            }
-
-            // Handle Interruption
-            if (message.serverContent?.interrupted) {
-              nextPlayTimeRef.current = audioCtx.currentTime;
-              setAiSpeaking(false);
-            }
-
-            // Handle Transcription
-            const aiTranscriptChunk = message.serverContent?.modelTurn?.parts.find(p => p.text)?.text;
-            if (aiTranscriptChunk) {
-              setTranscript(prev => {
-                let newTranscript = prev;
-                if (currentSpeakerRef.current !== 'AI') {
-                  newTranscript += (prev ? '\n\n' : '') + 'AI: ';
-                  currentSpeakerRef.current = 'AI';
-                }
-                return newTranscript + aiTranscriptChunk;
-              });
-              
-              if (aiTranscriptChunk.toLowerCase().includes('concludes our interview')) {
-                setTimeout(endInterview, 3000);
-              }
-            }
-            
-            const userTranscription = message.serverContent?.inputTranscription;
-            if (userTranscription) {
-              if (userTranscription.finished) {
-                setTranscript(prev => {
-                  let newTranscript = prev;
-                  if (currentSpeakerRef.current !== 'User') {
-                    newTranscript += (prev ? '\n\n' : '') + 'You: ';
-                    currentSpeakerRef.current = 'User';
-                  }
-                  return newTranscript + userTranscription.text;
-                });
-                setPartialTranscript('');
-              } else {
-                setPartialTranscript(userTranscription.text || '');
-              }
-            }
-          },
-          onerror: (err) => {
-            console.error("Live API Error:", err);
-            setIsConnecting(false);
-          },
-          onclose: () => {
-            setIsRecording(false);
-          }
-        }
-      });
-      
-      sessionRef.current = await sessionPromise;
-      
-    } catch (err) {
-      console.error("Failed to start Live API", err);
-      setIsConnecting(false);
-    }
+  const handleSendMessage = () => {
+    if (!inputText.trim() || !isRecording || !socketRef.current) return;
+    const text = inputText.trim();
+    setInputText('');
+    setMessages(prev => [...prev, { role: 'user', content: text, id: nextMsgId() }]);
+    socketRef.current.emit('textInput', text);
   };
 
   const endInterview = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
+    if (socketRef.current) socketRef.current.emit('endSession');
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
     stopEverything();
     setIsRecording(false);
   };
 
   const toggleMic = () => {
-    if (streamRef.current) {
-      streamRef.current.getAudioTracks().forEach(t => t.enabled = !micEnabled);
-      setMicEnabled(!micEnabled);
-    }
+    if (streamRef.current) { streamRef.current.getAudioTracks().forEach(t => t.enabled = !micEnabled); setMicEnabled(!micEnabled); }
   };
 
   const toggleCam = () => {
-    if (streamRef.current) {
-      streamRef.current.getVideoTracks().forEach(t => t.enabled = !camEnabled);
-      setCamEnabled(!camEnabled);
-    }
+    if (streamRef.current) { streamRef.current.getVideoTracks().forEach(t => t.enabled = !camEnabled); setCamEnabled(!camEnabled); }
   };
 
-  return (
-    <div className="min-h-screen bg-[#050505] flex flex-col relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-blue-900/10 to-transparent pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-blue-600/5 blur-[120px] rounded-full pointer-events-none" />
+  const fmt = (s: number) => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 
-      {/* Top Bar */}
-      <header className="h-16 flex items-center justify-between px-6 border-b border-zinc-800/50 bg-zinc-950/30 backdrop-blur-md z-10">
+  return (
+    <div className="h-screen bg-[#030308] flex flex-col relative overflow-hidden">
+      {/* Background */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(59,130,246,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,0.025) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-b from-purple-900/10 to-transparent blur-[100px]" />
+        <div className="absolute bottom-0 right-0 w-[300px] h-[300px] bg-blue-900/8 blur-[80px] rounded-full" />
+        {/* Floating particles */}
+        {[...Array(12)].map((_, i) => (
+          <motion.div
+            key={'p' + i}
+            className="absolute rounded-full"
+            style={{
+              width: 2 + (i % 3) * 1.5,
+              height: 2 + (i % 3) * 1.5,
+              left: `${8 + (i * 7.5) % 85}%`,
+              top: `${10 + (i * 13) % 80}%`,
+              background: i % 2 === 0 ? 'rgba(139,92,246,0.3)' : 'rgba(59,130,246,0.25)',
+            }}
+            animate={{
+              y: [0, -(20 + i * 4), 0],
+              opacity: [0.2, 0.6, 0.2],
+            }}
+            transition={{
+              duration: 4 + (i % 4) * 1.5,
+              repeat: Infinity,
+              delay: i * 0.6,
+              ease: 'easeInOut',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Header */}
+      <header className="relative z-20 h-12 flex items-center justify-between px-4 border-b border-white/[0.04] bg-black/60 backdrop-blur-xl shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]" />
-          <span className="font-mono text-sm tracking-widest uppercase text-zinc-400">Live Session</span>
+          <span className="text-sm font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireeon</span>
+          <div className="w-px h-4 bg-white/[0.08]" />
+          {isRecording ? (
+            <div className="flex items-center gap-1.5">
+              <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1.2, repeat: Infinity }} className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              <span className="font-mono text-[10px] text-red-400/80 tracking-[0.2em] uppercase">Live</span>
+              <span className="font-mono text-[10px] text-zinc-600 tabular-nums ml-1">{fmt(elapsed)}</span>
+            </div>
+          ) : isConnecting ? (
+            <div className="flex items-center gap-1.5">
+              <motion.div animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.8, repeat: Infinity }} className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span className="font-mono text-[10px] text-amber-400/80 tracking-[0.2em] uppercase">Connecting</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
+              <span className="font-mono text-[10px] text-zinc-600 tracking-[0.2em] uppercase">Standby</span>
+            </div>
+          )}
         </div>
-        <div className="font-mono text-sm text-zinc-500">
-          {prepData.companyName} <span className="text-blue-500/50">•</span> {prepData.roleTitle}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-500/8 border border-purple-500/15">
+            <Radio className="w-2.5 h-2.5 text-purple-400" />
+            <span className="text-[9px] font-mono text-purple-300/70 tracking-[0.12em] uppercase">Nova 2 Sonic</span>
+          </div>
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.02] border border-white/[0.05]">
+            <Shield className="w-2.5 h-2.5 text-zinc-600" />
+            <span className="text-[9px] font-mono text-zinc-600">{prepData.companyName} · {prepData.roleTitle}</span>
+          </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col lg:flex-row p-6 gap-6 relative z-10">
-        {/* Video Area */}
-        <div className="flex-1 relative rounded-3xl overflow-hidden bg-zinc-900/50 border border-zinc-800/50 flex items-center justify-center backdrop-blur-sm shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-          <video 
-            ref={videoRef} 
-            autoPlay 
-            playsInline 
-            muted 
-            className={`w-full h-full object-cover transition-opacity duration-500 ${camEnabled ? 'opacity-100' : 'opacity-0'}`}
-          />
-          {!camEnabled && (
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
-              <VideoOff className="w-12 h-12 text-zinc-700" />
-            </div>
-          )}
-          
-          {/* AI Speaking Indicator overlay */}
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: aiSpeaking ? 1 : 0 }}
-            className="absolute inset-0 border-4 border-blue-500/30 pointer-events-none transition-opacity duration-300 shadow-[inset_0_0_50px_rgba(59,130,246,0.1)]"
-          />
-          {aiSpeaking && (
-            <div className="absolute top-6 right-6 flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900/80 backdrop-blur-md border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.15)]">
-              <Activity className="w-4 h-4 text-blue-400 animate-pulse" />
-              <span className="text-xs font-mono text-blue-400 uppercase tracking-widest">AI Listening/Speaking</span>
-            </div>
-          )}
+      {/* Main — fixed height, never grows */}
+      <main className="flex-1 flex flex-col lg:flex-row gap-2.5 p-2.5 relative z-10 min-h-0 overflow-hidden">
+
+        {/* Video panel — fixed proportions */}
+        <div className="flex-1 flex flex-col gap-2 min-h-0 min-w-0">
+          <div className={'relative flex-1 rounded-xl overflow-hidden bg-black border transition-all duration-500 min-h-0 ' + (isAiSpeaking ? 'border-purple-500/30 shadow-[0_0_30px_rgba(139,92,246,0.12)]' : 'border-white/[0.04]')}>
+            <video ref={videoRef} autoPlay playsInline muted className={'absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ' + (camEnabled ? 'opacity-100' : 'opacity-0')} />
+
+            {!camEnabled && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2">
+                  <VideoOff className="w-8 h-8 text-zinc-700" />
+                  <span className="text-[10px] font-mono text-zinc-700">Camera Off</span>
+                </div>
+              </div>
+            )}
+
+            {/* Corner brackets */}
+            <div className="absolute top-2.5 left-2.5 w-6 h-6 border-t-2 border-l-2 border-blue-500/20 rounded-tl pointer-events-none" />
+            <div className="absolute top-2.5 right-2.5 w-6 h-6 border-t-2 border-r-2 border-blue-500/20 rounded-tr pointer-events-none" />
+            <div className="absolute bottom-2.5 left-2.5 w-6 h-6 border-b-2 border-l-2 border-blue-500/20 rounded-bl pointer-events-none" />
+            <div className="absolute bottom-2.5 right-2.5 w-6 h-6 border-b-2 border-r-2 border-blue-500/20 rounded-br pointer-events-none" />
+
+            {/* Top-left badges */}
+            <AnimatePresence>
+              {isRecording && (
+                <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} className="absolute top-3 left-3 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/70 backdrop-blur-md border border-red-500/20">
+                    <motion.div animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1, repeat: Infinity }} className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    <span className="text-[9px] font-mono text-red-400 uppercase tracking-widest">REC</span>
+                  </div>
+                  {snapshotCount > 0 && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/70 backdrop-blur-md border border-cyan-500/15">
+                      <Camera className="w-2.5 h-2.5 text-cyan-400/60" />
+                      <span className="text-[9px] font-mono text-cyan-400/50">{snapshotCount} snap</span>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* AI speaking waveform */}
+            <AnimatePresence>
+              {isAiSpeaking && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.3 }}
+                  className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-1.5 px-4 pb-3 pt-2 rounded-b-xl bg-gradient-to-t from-black/90 via-black/60 to-transparent backdrop-blur-sm">
+                  {/* Bars */}
+                  <div className="flex items-end gap-[3px] h-8">
+                    {[0.4, 0.7, 1.0, 0.8, 0.6, 0.9, 1.0, 0.75, 0.5, 0.85, 1.0, 0.65, 0.45, 0.8, 0.95, 0.6, 0.4, 0.7, 1.0, 0.8].map((amp, i) => (
+                      <motion.div
+                        key={i}
+                        className="w-[3px] rounded-full"
+                        style={{
+                          background: `linear-gradient(to top, #a855f7, #7c3aed${i % 3 === 0 ? ', #60a5fa' : ''})`,
+                          boxShadow: i % 4 === 0 ? '0 0 6px rgba(168,85,247,0.7)' : undefined,
+                        }}
+                        animate={{ height: ['3px', `${Math.round(amp * 28)}px`, '3px'] }}
+                        transition={{ duration: 0.35 + (i % 5) * 0.06, repeat: Infinity, delay: i * 0.04, ease: 'easeInOut' }}
+                      />
+                    ))}
+                  </div>
+                  {/* Label */}
+                  <span className="text-[9px] font-mono tracking-[0.18em] uppercase text-purple-300/50">Nova is speaking</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Connecting overlay */}
+            <AnimatePresence>
+              {isConnecting && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/70 backdrop-blur-md flex flex-col items-center justify-center gap-5 z-10">
+                  <div className="relative w-12 h-12">
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }} className="absolute inset-0 rounded-full border-2 border-transparent border-t-purple-500 border-r-blue-500/40" />
+                    <motion.div animate={{ rotate: -360 }} transition={{ duration: 3, repeat: Infinity, ease: 'linear' }} className="absolute inset-2 rounded-full border border-transparent border-t-blue-500/50" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-mono text-zinc-400 tracking-[0.2em] uppercase">Establishing Link</p>
+                    <p className="text-[10px] font-mono text-zinc-700 mt-1">Connecting to Nova 2 Sonic…</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Controls bar */}
+          <AnimatePresence>
+            {isRecording && (
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+                className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-black/60 border border-white/[0.05] backdrop-blur-sm shrink-0">
+                <div className="flex gap-2">
+                  <button onClick={toggleMic} title={micEnabled ? 'Mute mic' : 'Unmute mic'}
+                    className={'w-9 h-9 rounded-xl border flex items-center justify-center transition-all ' +
+                      (micEnabled ? 'bg-white/[0.04] border-white/[0.08] text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200'
+                                  : 'bg-red-500/15 border-red-500/25 text-red-400')}>
+                    {micEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                  </button>
+                  <button onClick={toggleCam} title={camEnabled ? 'Hide camera' : 'Show camera'}
+                    className={'w-9 h-9 rounded-xl border flex items-center justify-center transition-all ' +
+                      (camEnabled ? 'bg-white/[0.04] border-white/[0.08] text-zinc-400 hover:bg-white/[0.08] hover:text-zinc-200'
+                                  : 'bg-red-500/15 border-red-500/25 text-red-400')}>
+                    {camEnabled ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-700 tabular-nums">
+                  {fmt(elapsed)}
+                </div>
+                <button onClick={endInterview}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500/80 hover:bg-red-500 text-white transition-all text-xs font-medium border border-red-400/20 shadow-[0_0_16px_rgba(239,68,68,0.2)] hover:shadow-[0_0_24px_rgba(239,68,68,0.35)]">
+                  <Square className="w-2.5 h-2.5 fill-current" />
+                  End
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Controls & Transcript */}
-        <div className="w-full lg:w-96 flex flex-col gap-6">
-          {/* Controls */}
-          <div className="p-6 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 flex flex-col gap-4 backdrop-blur-sm">
+        {/* Transcript panel — FIXED height, internal scroll only */}
+        <div className="w-full lg:w-[380px] xl:w-[420px] flex flex-col rounded-xl bg-[#0a0a12]/90 border border-white/[0.05] backdrop-blur-sm overflow-hidden shrink-0 h-[300px] lg:h-auto">
+
+          {/* Panel header */}
+          <div className="px-4 py-3 border-b border-white/[0.04] flex items-center justify-between shrink-0 bg-black/30">
+            <div className="flex items-center gap-2">
+              <div className={'w-1.5 h-1.5 rounded-full transition-all duration-500 ' + (isRecording ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-zinc-700')} />
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-[0.2em]">Transcript</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {isRecording && !isAiSpeaking && (
+                <span className="text-[9px] font-mono text-emerald-500/60 tracking-wider flex items-center gap-1">
+                  <motion.span animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1.5, repeat: Infinity }} className="w-1 h-1 rounded-full bg-emerald-500 inline-block" />
+                  Listening
+                </span>
+              )}
+              {isAiSpeaking && (
+                <span className="text-[9px] font-mono text-purple-400/60 tracking-wider flex items-center gap-1">
+                  <motion.span animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.8, repeat: Infinity }} className="w-1 h-1 rounded-full bg-purple-400 inline-block" />
+                  AI Speaking
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Messages — scrollable container */}
+          <div className="flex-1 overflow-y-auto px-3 py-4 space-y-3 custom-scrollbar min-h-0">
+            {messages.filter(m => m.content.trim().length > 0).length === 0 && !isRecording && !isConnecting && !connectionError && (
+              <div className="h-full flex flex-col items-center justify-center text-center py-16">
+                <div className="w-12 h-12 rounded-xl bg-purple-500/6 border border-purple-500/10 flex items-center justify-center mb-3">
+                  <Bot className="w-6 h-6 text-purple-500/25" />
+                </div>
+                <p className="text-[11px] text-zinc-600 font-medium">Ready for your interview</p>
+                <p className="text-[10px] text-zinc-700 mt-1 font-mono">Nova 2 Sonic · Speech-to-Speech</p>
+              </div>
+            )}
+
+            {connectionError && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-3 rounded-lg bg-red-500/5 border border-red-500/15">
+                <p className="text-[10px] font-mono font-semibold text-red-400 mb-1">⚠ Connection Failed</p>
+                <p className="text-[10px] text-red-400/60 leading-relaxed">{connectionError}</p>
+                <p className="text-[10px] text-zinc-600 mt-2">Make sure the Sonic server is running:<br />
+                  <code className="text-zinc-400 bg-zinc-900/80 px-1.5 py-0.5 rounded text-[9px]">npm run sonic</code>
+                </p>
+              </motion.div>
+            )}
+
+            {messages.filter(m => m.content.trim().length > 0).map((msg) => (
+              <motion.div key={msg.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}
+                className={'flex gap-2.5 ' + (msg.role === 'user' ? 'flex-row-reverse' : '')}>
+                <div className={'w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ' +
+                  (msg.role === 'assistant' ? 'bg-purple-500/15 text-purple-400' : 'bg-blue-500/15 text-blue-400')}>
+                  {msg.role === 'assistant' ? <Bot className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                </div>
+                <div className={'flex flex-col gap-1 max-w-[85%] ' + (msg.role === 'user' ? 'items-end' : 'items-start')}>
+                  <span className={'text-[9px] font-mono uppercase tracking-wider px-0.5 ' +
+                    (msg.role === 'assistant' ? 'text-purple-400/40' : 'text-blue-400/40')}>
+                    {msg.role === 'assistant' ? 'Interviewer' : 'You'}
+                  </span>
+                  <div className={'px-3.5 py-2.5 rounded-2xl text-[13px] leading-[1.6] break-words ' +
+                    (msg.role === 'assistant'
+                      ? 'bg-[#1a1025] border border-purple-500/15 text-zinc-200 rounded-tl-sm'
+                      : 'bg-[#0d1a2e] border border-blue-500/15 text-zinc-200 rounded-tr-sm')}>
+                    {msg.content}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+
+            {/* Typing indicator — only show when AI is speaking and no current message content yet */}
+            <AnimatePresence>
+              {isAiSpeaking && !aiHasText && (
+                <motion.div key="typing" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15 }}
+                  className="flex gap-2.5">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 bg-purple-500/15 text-purple-400">
+                    <Bot className="w-3 h-3" />
+                  </div>
+                  <div className="flex flex-col gap-1 items-start">
+                    <span className="text-[9px] font-mono uppercase tracking-wider px-0.5 text-purple-400/40">Interviewer</span>
+                    <div className="px-3.5 py-2.5 rounded-2xl rounded-tl-sm bg-[#1a1025] border border-purple-500/15">
+                      <span className="flex items-center gap-1 text-zinc-500">
+                        <motion.span className="text-[8px]" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.1, repeat: Infinity }}>●</motion.span>
+                        <motion.span className="text-[8px]" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.1, repeat: Infinity, delay: 0.2 }}>●</motion.span>
+                        <motion.span className="text-[8px]" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.1, repeat: Infinity, delay: 0.4 }}>●</motion.span>
+                      </span>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {interviewEnded && (
+              <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
+                className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-center">
+                <p className="text-[11px] font-mono font-semibold text-emerald-400">Interview Complete</p>
+                <p className="text-[10px] text-emerald-400/50 mt-0.5">Generating analysis…</p>
+              </motion.div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Bottom input / start button */}
+          <div className="px-3 py-3 border-t border-white/[0.04] shrink-0">
             {!isRecording && !isConnecting ? (
-              <button 
-                onClick={startInterview}
-                className="w-full py-4 rounded-2xl bg-blue-500 text-white font-medium text-lg hover:bg-blue-400 transition-all duration-300 shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)]"
-              >
-                Start Interview
+              <button onClick={startInterview}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold text-sm
+                  hover:from-purple-500 hover:to-blue-500 transition-all duration-200
+                  shadow-[0_0_24px_rgba(139,92,246,0.25)] hover:shadow-[0_0_32px_rgba(139,92,246,0.4)]
+                  flex items-center justify-center gap-2 border border-white/[0.06]">
+                <Mic className="w-4 h-4" />
+                Start Voice Interview
               </button>
             ) : isConnecting ? (
-              <button disabled className="w-full py-4 rounded-2xl bg-zinc-800/50 text-zinc-500 font-medium text-lg flex items-center justify-center gap-2 border border-zinc-700/50">
-                <Activity className="w-5 h-5 animate-spin text-blue-500" />
-                Connecting...
-              </button>
+              <div className="w-full py-3 rounded-xl bg-zinc-900/50 border border-white/[0.04] flex items-center justify-center gap-2 text-zinc-500 text-sm">
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }} className="w-3.5 h-3.5 rounded-full border-2 border-purple-500/30 border-t-purple-400" />
+                Connecting to Sonic…
+              </div>
             ) : (
-              <div className="grid grid-cols-3 gap-3">
-                <button 
-                  onClick={toggleMic}
-                  className={`flex flex-col items-center justify-center gap-2 py-3 rounded-2xl border transition-all duration-300 ${micEnabled ? 'bg-zinc-800/80 border-zinc-700/50 text-zinc-200 hover:bg-zinc-700' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}
-                >
-                  {micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-                  <span className="text-xs font-mono uppercase tracking-wider">Mic</span>
-                </button>
-                <button 
-                  onClick={toggleCam}
-                  className={`flex flex-col items-center justify-center gap-2 py-3 rounded-2xl border transition-all duration-300 ${camEnabled ? 'bg-zinc-800/80 border-zinc-700/50 text-zinc-200 hover:bg-zinc-700' : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'}`}
-                >
-                  {camEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-                  <span className="text-xs font-mono uppercase tracking-wider">Cam</span>
-                </button>
-                <button 
-                  onClick={endInterview}
-                  className="flex flex-col items-center justify-center gap-2 py-3 rounded-2xl bg-red-500/90 text-white hover:bg-red-500 transition-all duration-300 shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_25px_rgba(239,68,68,0.5)] border border-red-400/50"
-                >
-                  <Square className="w-5 h-5 fill-current" />
-                  <span className="text-xs font-mono uppercase tracking-wider">End</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={e => setInputText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+                  placeholder="Or type a message…"
+                  disabled={interviewEnded}
+                  className="flex-1 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06] text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-purple-500/30 transition-colors text-[13px] disabled:opacity-30"
+                />
+                <button onClick={handleSendMessage} disabled={!inputText.trim() || interviewEnded}
+                  className="px-3 py-2 rounded-lg bg-purple-600/70 hover:bg-purple-500/80 text-white transition-all disabled:opacity-20 disabled:cursor-not-allowed border border-purple-400/15">
+                  <Send className="w-3.5 h-3.5" />
                 </button>
               </div>
             )}
-          </div>
-
-          {/* Transcript Preview */}
-          <div className="flex-1 p-6 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 flex flex-col overflow-hidden backdrop-blur-sm">
-            <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-4 shrink-0 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-blue-500/50" />
-              Live Transcript
-            </h3>
-            <div className="flex-1 overflow-y-auto font-mono text-sm text-zinc-400 space-y-4 pr-2 custom-scrollbar">
-              {transcript || partialTranscript ? (
-                <>
-                  {transcript.split('\n\n').map((block, i) => {
-                    if (!block.trim()) return null;
-                    const isAI = block.startsWith('AI:');
-                    return (
-                      <div key={i} className={isAI ? 'text-blue-400' : 'text-zinc-300'}>
-                        {block}
-                      </div>
-                    );
-                  })}
-                  {partialTranscript && (
-                    <div className="text-zinc-500 italic">
-                      {currentSpeakerRef.current !== 'User' && transcript ? '\n\nYou: ' : ''}
-                      {partialTranscript}...
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="h-full flex items-center justify-center text-zinc-600 italic font-sans font-light">
-                  Transcript will appear here...
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </main>

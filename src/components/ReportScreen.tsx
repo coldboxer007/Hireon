@@ -36,7 +36,7 @@ export default function ReportScreen({ data, onRestart }: ReportScreenProps) {
               <span>Analysis Complete</span>
             </div>
             <h1 className="text-4xl lg:text-6xl font-sans font-medium tracking-tight text-white">
-              Performance Report
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireeon</span> Report
             </h1>
             <p className="text-xl text-zinc-400 font-light">
               Your readiness score and tonight's crash plan.

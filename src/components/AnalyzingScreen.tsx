@@ -1,132 +1,151 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Loader2, Activity, FileText, Video, CheckCircle2 } from 'lucide-react';
-import { PrepData, ReportData } from '../types';
-import { GoogleGenAI, Type } from '@google/genai';
+import { Loader2, FileText, Camera, CheckCircle2, Brain } from 'lucide-react';
+import { PrepData, ReportData, InterviewSnapshot } from '../types';
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Initialize Bedrock client
+const bedrockClient = new BedrockRuntimeClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
 
 interface AnalyzingScreenProps {
   prepData: PrepData;
   video: Blob;
   transcript: string;
+  snapshots: InterviewSnapshot[];
   onComplete: (data: ReportData) => void;
 }
 
 const steps = [
-  { id: 'upload', label: 'Processing Video & Audio', icon: Video },
+  { id: 'frames', label: 'Processing Camera Snapshots', icon: Camera },
   { id: 'transcript', label: 'Analyzing Transcript', icon: FileText },
-  { id: 'metrics', label: 'Calculating Metrics', icon: Activity },
+  { id: 'metrics', label: 'Deep Reasoning Analysis', icon: Brain },
   { id: 'report', label: 'Generating Final Report', icon: CheckCircle2 },
 ];
 
-export default function AnalyzingScreen({ prepData, video, transcript, onComplete }: AnalyzingScreenProps) {
+export default function AnalyzingScreen({ prepData, video, transcript, snapshots, onComplete }: AnalyzingScreenProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [reasoningText, setReasoningText] = useState<string>('');
+  const [framesUsed, setFramesUsed] = useState(0);
 
   useEffect(() => {
     const runAnalysis = async () => {
       try {
-        setCurrentStep(1); // Transcript
+        setCurrentStep(1); // Frames / transcript
 
-        // Convert video blob to base64
-        let videoBase64 = '';
-        const MAX_INLINE_SIZE = 15 * 1024 * 1024; // 15MB
-        
-        if (video.size <= MAX_INLINE_SIZE) {
-          videoBase64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(video);
-            reader.onload = () => {
-              if (typeof reader.result === 'string') {
-                resolve(reader.result.split(',')[1]);
-              } else {
-                reject(new Error('Failed to convert video'));
-              }
-            };
-            reader.onerror = reject;
-          });
-        } else {
-          console.warn("Video too large for inline data, falling back to transcript analysis only.");
-        }
-
-        setCurrentStep(2); // Metrics
-
-        const prompt = `
-          I am providing a recorded mock interview video and its transcript (if available).
-          The candidate is interviewing for ${prepData.roleTitle} at ${prepData.companyName}.
-          Transcript:
-          ${transcript || 'No transcript available. Rely on video/audio.'}
-
-          Analyze the performance and generate a final report.
-          Include:
-          1. Overall Score (0-100)
-          2. Metrics (Communication, Technical, Confidence) (0-100)
-          3. Good Examples (quotes and reasons)
-          4. Bad Examples (quotes, reasons, and improvements)
-          5. Action Plan (Tonight's Crash Plan)
-          6. Video Insights (body language, eye contact, tone) - If no video is provided, infer from transcript or state "Video analysis skipped due to size limits".
-
-          Return the result as a JSON object matching this schema:
-          {
-            "overallScore": number,
-            "metrics": {
-              "communication": number,
-              "technical": number,
-              "confidence": number
-            },
-            "goodExamples": [{ "quote": "string", "reason": "string" }],
-            "badExamples": [{ "quote": "string", "reason": "string", "improvement": "string" }],
-            "actionPlan": "string (markdown)",
-            "videoInsights": "string (markdown)"
+        // ── Select up to 8 evenly-spaced snapshots ────────────────────────
+        // Nova 2 Lite supports up to 20 images per request; we use ≤8 to stay
+        // well inside token limits while giving good temporal coverage.
+        const MAX_FRAMES = 8;
+        let selectedSnapshots: InterviewSnapshot[] = [];
+        if (snapshots.length > 0) {
+          if (snapshots.length <= MAX_FRAMES) {
+            selectedSnapshots = snapshots;
+          } else {
+            // Evenly spaced indices
+            for (let i = 0; i < MAX_FRAMES; i++) {
+              const idx = Math.round(i * (snapshots.length - 1) / (MAX_FRAMES - 1));
+              selectedSnapshots.push(snapshots[idx]);
+            }
           }
-        `;
+          setFramesUsed(selectedSnapshots.length);
+        }
 
-        const parts: any[] = [{ text: prompt }];
-        if (videoBase64) {
-          parts.unshift({
-            inlineData: {
-              data: videoBase64,
-              mimeType: video.type || 'video/webm',
+        setCurrentStep(2); // Deep reasoning
+
+        const hasFrames = selectedSnapshots.length > 0;
+
+        const prompt = `You are analyzing a mock interview recording for the role of ${prepData.roleTitle} at ${prepData.companyName}.
+
+${hasFrames
+  ? `I have provided ${selectedSnapshots.length} webcam snapshots taken at regular intervals (timestamps: ${selectedSnapshots.map(s => `${s.timestamp}s`).join(', ')}) during the interview. Analyze body language, eye contact, posture, facial expressions, and overall presence from these frames.`
+  : 'No camera frames were available; base visual analysis on the transcript only.'}
+
+Transcript of the interview:
+${transcript || 'No transcript available.'}
+
+Generate a comprehensive performance report. Return ONLY a valid JSON object matching this exact schema, no markdown fences:
+{
+  "overallScore": <number 0-100>,
+  "metrics": {
+    "communication": <number 0-100>,
+    "technical": <number 0-100>,
+    "confidence": <number 0-100>
+  },
+  "goodExamples": [{ "quote": "<string>", "reason": "<string>" }],
+  "badExamples": [{ "quote": "<string>", "reason": "<string>", "improvement": "<string>" }],
+  "actionPlan": "<markdown string — tonight's crash plan>",
+  "videoInsights": "<markdown string — body language, eye contact, posture observations from the ${hasFrames ? selectedSnapshots.length + ' camera frames' : 'transcript'}>"
+}`;
+
+        // ── Build content array: images first, then the prompt ────────────
+        // Nova 2 Lite image format: { image: { format: 'jpeg', source: { bytes: Uint8Array } } }
+        const content: any[] = [];
+
+        for (const snap of selectedSnapshots) {
+          const bytes = Uint8Array.from(atob(snap.base64), c => c.charCodeAt(0));
+          content.push({
+            image: {
+              format: 'jpeg',
+              source: { bytes },
             },
           });
         }
+        content.push({ text: prompt });
 
-        // Simulate progress steps for better UX
+        // Simulate progress ticks for UX
         let simulatedStep = 1;
         const progressInterval = setInterval(() => {
           simulatedStep++;
-          if (simulatedStep < 4) {
-            setCurrentStep(simulatedStep);
-          }
-        }, 5000);
+          if (simulatedStep < 4) setCurrentStep(simulatedStep);
+        }, 6000);
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
-          contents: { parts },
-          config: {
-            temperature: 0.2,
+        // ── Call Nova 2 Lite (reasoningConfig — no temperature/maxTokens) ──
+        const response = await bedrockClient.send(new ConverseCommand({
+          modelId: 'us.amazon.nova-2-lite-v1:0',
+          system: [{ text: 'You are an expert interview performance analyst. Return only valid JSON with no markdown fences.' }],
+          messages: [{ role: 'user', content }],
+          additionalModelRequestFields: {
+            reasoningConfig: {
+              type: 'enabled',
+              maxReasoningEffort: 'high',
+            },
           },
-        });
+        }));
 
         clearInterval(progressInterval);
-        setCurrentStep(3); // Report
-        
-        const text = response.text;
-        if (!text) throw new Error('No response from AI');
-        
-        let data;
+        setCurrentStep(3);
+
+        // ── Parse response ─────────────────────────────────────────────────
+        let outputText = '';
+        const contentBlocks = response.output?.message?.content || [];
+        for (const block of contentBlocks) {
+          if ('reasoningContent' in block) {
+            const reasoning = (block as any).reasoningContent?.reasoningText?.text;
+            if (reasoning) setReasoningText(reasoning);
+          } else if ('text' in block) {
+            outputText = (block as any).text || '';
+          }
+        }
+
+        if (!outputText) throw new Error('No response from AI');
+
+        let data: ReportData;
         try {
-          const jsonStr = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+          const jsonStr = outputText.replace(/```json/gi, '').replace(/```/g, '').trim();
           data = JSON.parse(jsonStr);
         } catch (e) {
-          console.error("Failed to parse JSON:", text);
-          throw new Error("Failed to parse AI response into structured data.");
+          console.error('Failed to parse JSON:', outputText);
+          throw new Error('Failed to parse AI response into structured data.');
         }
-        
-        setTimeout(() => {
-          onComplete(data);
-        }, 1500);
+
+        setTimeout(() => onComplete(data), 1500);
 
       } catch (err: any) {
         console.error('Analysis error:', err);
@@ -135,7 +154,7 @@ export default function AnalyzingScreen({ prepData, video, transcript, onComplet
     };
 
     runAnalysis();
-  }, [prepData, video, transcript, onComplete]);
+  }, [prepData, video, transcript, snapshots, onComplete]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
@@ -149,8 +168,14 @@ export default function AnalyzingScreen({ prepData, video, transcript, onComplet
             Analyzing Performance
           </h2>
           <p className="text-blue-400/80 font-mono text-xs uppercase tracking-widest">
-            Processing telemetry and behavioral data...
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400 font-semibold normal-case tracking-tight text-sm">Hireeon</span>
+            {' · '}Nova 2 Lite · Extended Thinking
           </p>
+          {framesUsed > 0 && (
+            <p className="text-zinc-500 font-mono text-xs">
+              Analyzing {framesUsed} camera frame{framesUsed !== 1 ? 's' : ''} + transcript
+            </p>
+          )}
         </div>
 
         {error ? (
@@ -208,6 +233,25 @@ export default function AnalyzingScreen({ prepData, video, transcript, onComplet
                 </motion.div>
               );
             })}
+            
+            {/* Extended Thinking Indicator */}
+            {currentStep === 2 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-2xl bg-purple-500/10 border border-purple-500/20 backdrop-blur-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <Brain className="w-5 h-5 text-purple-400 animate-pulse" />
+                  <span className="text-sm text-purple-300 font-mono">Deep reasoning active for nuanced feedback...</span>
+                </div>
+                {reasoningText && (
+                  <p className="mt-2 text-xs text-purple-400/70 font-mono line-clamp-3">
+                    {reasoningText.substring(0, 150)}...
+                  </p>
+                )}
+              </motion.div>
+            )}
           </div>
         )}
       </div>

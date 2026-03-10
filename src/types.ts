@@ -26,3 +26,12 @@ export interface ReportData {
   actionPlan: string;
   videoInsights?: string;
 }
+
+/**
+ * A single webcam snapshot captured during the mock interview.
+ * base64 is a JPEG encoded at ~50KB (480×360, quality 0.7).
+ */
+export interface InterviewSnapshot {
+  base64: string;       // raw base64, no data: prefix
+  timestamp: number;    // seconds elapsed since interview started
+}

@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { PrepData } from '../types';
-import { ArrowRight, Target, Zap, AlertTriangle, BookOpen, ExternalLink, Activity } from 'lucide-react';
+import { ArrowRight, Target, Zap, AlertTriangle, BookOpen, Activity, Cpu, TrendingUp } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
@@ -10,104 +10,116 @@ interface PrepPackScreenProps {
 }
 
 export default function PrepPackScreen({ data, onStartInterview }: PrepPackScreenProps) {
-  // Ensure we have skills data to show
   const hasSkills = data.fitMap?.skillsAnalysis && data.fitMap.skillsAnalysis.length > 0;
+  const score = data.fitMap.alignmentScore;
+  const scoreColor = score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-amber-400' : 'text-red-400';
+  const barColor = score >= 80 ? 'bg-emerald-500' : score >= 60 ? 'bg-amber-500' : 'bg-red-500';
 
   return (
-    <div className="min-h-screen p-6 lg:p-12 relative overflow-x-hidden">
+    <div className="min-h-screen bg-[#070710] relative overflow-x-hidden">
       {/* Background */}
-      <div className="fixed inset-0 bg-[#050505] -z-10">
-        <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-blue-900/10 to-transparent" />
-        <div className="absolute top-1/4 right-0 w-[600px] h-[600px] bg-blue-600/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+        <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-blue-950/20 to-transparent" />
+        <div className="absolute top-1/3 right-[-10%] w-[500px] h-[500px] rounded-full bg-indigo-950/30 blur-[120px]" />
+        <div className="absolute bottom-1/4 left-[-5%] w-[400px] h-[400px] rounded-full bg-blue-950/20 blur-[100px]" />
+        <svg className="absolute inset-0 w-full h-full opacity-[0.025]" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="prep-dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+              <circle cx="1.5" cy="1.5" r="1.5" fill="white" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#prep-dots)" />
+        </svg>
       </div>
 
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="max-w-7xl mx-auto px-6 py-10 lg:px-12 lg:py-14 space-y-10">
+
+        {/* Model badge row */}
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+          className="flex flex-wrap items-center justify-center gap-2">
+          <span className="text-sm font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireeon</span>
+          <span className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest">powered by</span>
+          {[
+            { label: 'Nova 2 Lite · Research', icon: Cpu, color: 'blue' },
+            { label: 'Nova 2 Sonic · Interview', icon: Activity, color: 'violet' },
+            { label: 'Nova 2 Lite · Thinking', icon: Zap, color: 'emerald' },
+          ].map((m) => (
+            <span key={m.label} className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-mono
+              ${m.color === 'blue' ? 'border-blue-500/20 bg-blue-500/8 text-blue-400'
+              : m.color === 'violet' ? 'border-violet-500/20 bg-violet-500/8 text-violet-400'
+              : 'border-emerald-500/20 bg-emerald-500/8 text-emerald-400'}`}>
+              <m.icon className="w-3 h-3" />
+              {m.label}
+            </span>
+          ))}
+        </motion.div>
+
         {/* Header */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-8 border-b border-zinc-800/50"
-        >
-          <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-xs font-mono uppercase tracking-widest mb-2 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-              <Target className="w-4 h-4" />
-              <span>Target Locked</span>
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.05 }}
+          className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-8 border-b border-zinc-800/50">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-blue-500/25 bg-blue-500/8 text-blue-400 text-[10px] font-mono uppercase tracking-widest">
+              <Target className="w-3 h-3" />
+              Target Locked
             </div>
-            <h1 className="text-4xl lg:text-6xl font-sans font-medium tracking-tight text-white">
+            <h1 className="text-4xl lg:text-6xl font-light tracking-[-0.025em] text-white leading-[1.08]">
               {data.roleTitle}
             </h1>
-            <p className="text-xl text-zinc-400 font-light">
-              at <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 font-medium">{data.companyName}</span>
+            <p className="text-xl text-zinc-500 font-light">
+              at <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-violet-400 font-medium">{data.companyName}</span>
             </p>
           </div>
 
-          <button
-            onClick={onStartInterview}
-            className="group relative flex items-center gap-3 px-8 py-4 rounded-full bg-white text-black font-medium text-lg transition-all duration-500 hover:bg-zinc-200 hover:scale-105 shadow-[0_0_40px_rgba(255,255,255,0.15)]"
-          >
+          <button onClick={onStartInterview}
+            className="group flex items-center gap-3 px-8 py-4 rounded-full bg-white text-black font-medium text-base transition-all duration-300 hover:bg-zinc-100 hover:scale-[1.03] shadow-[0_0_50px_rgba(255,255,255,0.1)] hover:shadow-[0_0_60px_rgba(255,255,255,0.18)] shrink-0 self-start md:self-auto">
             Enter Mock Interview
-            <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-            <div className="absolute inset-0 rounded-full border border-white/20 animate-ping" style={{ animationDuration: '3s' }} />
+            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
           </button>
         </motion.div>
 
-        <div className="grid lg:grid-cols-12 gap-8">
-          {/* Left Column: Fit Map & Radar */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="lg:col-span-4 space-y-8"
-          >
-            {/* Alignment Score */}
-            <div className="p-8 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 backdrop-blur-sm relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[50px] rounded-full" />
-              <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-6">Alignment Score</h3>
-              <div className="flex items-end gap-4">
-                <div className="text-7xl font-light tracking-tighter text-white">
-                  {data.fitMap.alignmentScore}
-                </div>
-                <div className="text-xl text-zinc-500 mb-2 font-mono">/ 100</div>
+        {/* Main grid */}
+        <div className="grid lg:grid-cols-12 gap-6">
+
+          {/* Left column */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.1 }}
+            className="lg:col-span-4 space-y-5">
+
+            {/* Score card */}
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 rounded-full bg-blue-500/8 blur-[50px]" />
+              <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-[0.2em] mb-4">Alignment Score</p>
+              <div className="flex items-baseline gap-2 mb-5">
+                <span className={`text-6xl font-light tracking-[-0.04em] ${scoreColor}`}>{score}</span>
+                <span className="text-lg text-zinc-600 font-mono">/100</span>
               </div>
-              <div className="mt-8 h-1.5 w-full bg-zinc-800/50 rounded-full overflow-hidden">
-                <motion.div 
+              <div className="h-1.5 w-full bg-zinc-800/60 rounded-full overflow-hidden">
+                <motion.div
                   initial={{ width: 0 }}
-                  animate={{ width: `${data.fitMap.alignmentScore}%` }}
-                  transition={{ duration: 1.5, delay: 0.5, ease: "easeOut" }}
-                  className={`h-full shadow-[0_0_10px_currentColor] ${data.fitMap.alignmentScore >= 80 ? 'bg-blue-400 text-blue-400' : data.fitMap.alignmentScore >= 60 ? 'bg-amber-400 text-amber-400' : 'bg-red-400 text-red-400'}`}
+                  animate={{ width: `${score}%` }}
+                  transition={{ duration: 1.4, delay: 0.4, ease: 'easeOut' }}
+                  className={`h-full rounded-full ${barColor}`}
                 />
               </div>
+              <p className="text-[10px] font-mono text-zinc-700 mt-2">
+                {score >= 80 ? 'Strong match — well positioned' : score >= 60 ? 'Decent fit — prep the gaps' : 'Moderate fit — focused prep needed'}
+              </p>
             </div>
 
-            {/* Radar Chart (Skills Analysis) */}
+            {/* Radar */}
             {hasSkills && (
-              <div className="p-8 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 backdrop-blur-sm relative overflow-hidden">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-blue-500/5 blur-[50px] rounded-full" />
-                <h3 className="flex items-center gap-2 text-xs font-mono text-blue-400 uppercase tracking-widest mb-6 relative z-10">
-                  <Activity className="w-4 h-4" />
-                  Skills Analysis
-                </h3>
-                <div className="h-[280px] w-full relative z-10 -ml-2">
+              <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-6 relative overflow-hidden">
+                <div className="absolute inset-0 bg-blue-500/3 blur-[60px] rounded-full" />
+                <p className="flex items-center gap-2 text-[10px] font-mono text-blue-400 uppercase tracking-[0.2em] mb-5 relative z-10">
+                  <Activity className="w-3 h-3" /> Skills Analysis
+                </p>
+                <div className="h-64 w-full relative z-10">
                   <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data.fitMap.skillsAnalysis}>
+                    <RadarChart cx="50%" cy="50%" outerRadius="68%" data={data.fitMap.skillsAnalysis}>
                       <PolarGrid stroke="#27272a" />
-                      <PolarAngleAxis 
-                        dataKey="skill" 
-                        tick={{ fill: '#a1a1aa', fontSize: 10, fontFamily: 'monospace' }} 
-                      />
+                      <PolarAngleAxis dataKey="skill" tick={{ fill: '#71717a', fontSize: 9, fontFamily: 'monospace' }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', fontSize: '12px', fontFamily: 'monospace' }}
-                        itemStyle={{ color: '#60a5fa' }}
-                      />
-                      <Radar
-                        name="Score"
-                        dataKey="score"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        fill="#3b82f6"
-                        fillOpacity={0.2}
-                      />
+                      <Tooltip contentStyle={{ backgroundColor: '#111', borderColor: '#27272a', borderRadius: '10px', fontSize: '11px', fontFamily: 'monospace' }} itemStyle={{ color: '#60a5fa' }} />
+                      <Radar name="Score" dataKey="score" stroke="#3b82f6" strokeWidth={2} fill="#3b82f6" fillOpacity={0.15} />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>
@@ -115,93 +127,76 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
             )}
 
             {/* Strengths */}
-            <div className="p-8 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 backdrop-blur-sm">
-              <h3 className="flex items-center gap-2 text-xs font-mono text-blue-400 uppercase tracking-widest mb-6">
-                <Zap className="w-4 h-4" />
-                Key Strengths
-              </h3>
-              <ul className="space-y-4">
-                {data.fitMap?.strengths?.map((strength, i) => (
-                  <li key={i} className="flex gap-4 text-zinc-300">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0 shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
-                    <span className="leading-relaxed text-sm">{strength}</span>
-                  </li>
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-6">
+              <p className="flex items-center gap-2 text-[10px] font-mono text-blue-400 uppercase tracking-[0.2em] mb-4">
+                <Zap className="w-3 h-3" /> Key Strengths
+              </p>
+              <ul className="space-y-3">
+                {data.fitMap?.strengths?.map((s, i) => (
+                  <motion.li key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 + i * 0.07 }}
+                    className="flex gap-3 text-zinc-300 text-sm leading-relaxed">
+                    <div className="w-1 h-1 rounded-full bg-blue-400 mt-2 shrink-0" />
+                    {s}
+                  </motion.li>
                 ))}
               </ul>
             </div>
 
             {/* Gaps */}
-            <div className="p-8 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 backdrop-blur-sm">
-              <h3 className="flex items-center gap-2 text-xs font-mono text-amber-400 uppercase tracking-widest mb-6">
-                <AlertTriangle className="w-4 h-4" />
-                Potential Gaps
-              </h3>
-              <ul className="space-y-4">
-                {data.fitMap?.gaps?.map((gap, i) => (
-                  <li key={i} className="flex gap-4 text-zinc-300">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-2 shrink-0 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-                    <span className="leading-relaxed text-sm">{gap}</span>
-                  </li>
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-6">
+              <p className="flex items-center gap-2 text-[10px] font-mono text-amber-400 uppercase tracking-[0.2em] mb-4">
+                <AlertTriangle className="w-3 h-3" /> Potential Gaps
+              </p>
+              <ul className="space-y-3">
+                {data.fitMap?.gaps?.map((g, i) => (
+                  <motion.li key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.07 }}
+                    className="flex gap-3 text-zinc-300 text-sm leading-relaxed">
+                    <div className="w-1 h-1 rounded-full bg-amber-400 mt-2 shrink-0" />
+                    {g}
+                  </motion.li>
                 ))}
               </ul>
             </div>
           </motion.div>
 
-          {/* Right Column: Insights & Plan */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="lg:col-span-8 space-y-8"
-          >
+          {/* Right column */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.15 }}
+            className="lg:col-span-8 space-y-5">
+
             {/* Interview Plan */}
-            <div className="p-8 lg:p-10 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 backdrop-blur-sm relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 blur-[80px] rounded-full pointer-events-none" />
-              <h3 className="flex items-center gap-2 text-xs font-mono text-blue-400 uppercase tracking-widest mb-8 relative z-10">
-                <BookOpen className="w-4 h-4" />
-                Interview Plan
-              </h3>
-              <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-a:text-blue-400 prose-li:text-zinc-300 relative z-10">
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-7 lg:p-9 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-60 h-60 bg-blue-500/4 blur-[80px] rounded-full" />
+              <p className="flex items-center gap-2 text-[10px] font-mono text-blue-400 uppercase tracking-[0.2em] mb-6 relative z-10">
+                <BookOpen className="w-3 h-3" /> Interview Plan
+              </p>
+              <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-headings:tracking-tight prose-a:text-blue-400 prose-li:text-zinc-300 prose-p:text-zinc-400 relative z-10 prose-sm lg:prose-base">
                 <Markdown>{data.interviewPlan}</Markdown>
               </div>
             </div>
 
-            {/* Company Insights */}
-            <div className="p-8 lg:p-10 rounded-3xl bg-zinc-900/30 border border-zinc-800/50 backdrop-blur-sm">
-              <h3 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-8">
-                Company Intelligence
-              </h3>
-              <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-li:text-zinc-300">
+            {/* Company Intelligence */}
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-7 lg:p-9">
+              <p className="flex items-center gap-2 text-[10px] font-mono text-violet-400 uppercase tracking-[0.2em] mb-6">
+                <TrendingUp className="w-3 h-3" /> Company Intelligence
+              </p>
+              <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-headings:tracking-tight prose-li:text-zinc-300 prose-p:text-zinc-400 prose-sm lg:prose-base">
                 <Markdown>{data.companyInsights}</Markdown>
               </div>
-              
-              {data.sources && data.sources.length > 0 && (
-                <div className="mt-10 pt-8 border-t border-zinc-800/50">
-                  <h4 className="text-xs font-mono text-zinc-500 uppercase tracking-widest mb-4">Sources</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {data.sources.map((source, i) => {
-                      try {
-                        const url = new URL(source);
-                        return (
-                          <a 
-                            key={i} 
-                            href={source} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/30 border border-zinc-700/50 text-zinc-400 text-xs hover:bg-zinc-800 hover:text-zinc-200 hover:border-zinc-600 transition-all"
-                          >
-                            {url.hostname}
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        );
-                      } catch (e) {
-                        return null;
-                      }
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* Bottom CTA */}
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
+              className="rounded-2xl border border-zinc-800/40 bg-gradient-to-r from-zinc-900/60 to-zinc-900/30 p-6 flex flex-col sm:flex-row items-center justify-between gap-5">
+              <div>
+                <p className="text-sm font-medium text-zinc-200">Ready for the mock interview?</p>
+                <p className="text-xs text-zinc-600 font-mono mt-0.5">Nova 2 Sonic will conduct a live speech-to-speech session</p>
+              </div>
+              <button onClick={onStartInterview}
+                className="group flex items-center gap-2.5 px-7 py-3.5 rounded-full bg-white text-black font-medium text-sm transition-all duration-300 hover:bg-zinc-100 hover:scale-[1.03] shadow-[0_0_40px_rgba(255,255,255,0.1)] shrink-0">
+                Start Interview
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+              </button>
+            </motion.div>
           </motion.div>
         </div>
       </div>

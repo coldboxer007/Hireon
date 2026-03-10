@@ -6,3 +6,16 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Migration docs (internal only)
+GEMINI_TO_NOVA_MIGRATION.md
+INTERVIEW_INTELLIGENCE_NOVA_MIGRATION.md
+
+# Temp files
+src/temp.*
+
+# Editor
+.vscode/
+*.swp
+*.swo
+*~
