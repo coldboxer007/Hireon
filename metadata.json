@@ -1,0 +1,5 @@
+{
+  "name": "Interview Intelligence",
+  "description": "High-stakes mock interview prep using Gemini Live API and Search Grounding.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
