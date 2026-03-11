@@ -49,6 +49,32 @@ function nextMsgId() {
   return 'msg-' + (++msgIdCounter);
 }
 
+/* ── Dedup helper — is this text essentially the same as the last assistant msg? */
+function isDuplicateAssistantMsg(prev: Message[], text: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed) return true;
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].role === 'assistant') {
+      const prevTrimmed = prev[i].content.trim().toLowerCase();
+      // Exact match or one is a prefix of the other (streaming partial repeat)
+      if (prevTrimmed === trimmed || prevTrimmed.startsWith(trimmed) || trimmed.startsWith(prevTrimmed)) return true;
+      break; // only compare with the most recent assistant message
+    }
+  }
+  return false;
+}
+
+/* ── Filter out raw JSON / protocol noise from transcript text */
+function isProtocolNoise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  // Filter { "interrupted" : true }, { "error": ... } etc.
+  if (/^\s*\{.*\}\s*$/.test(t)) {
+    try { JSON.parse(t); return true; } catch { /* not JSON, keep it */ }
+  }
+  return false;
+}
+
 export default function MockInterviewScreen({ prepData, interviewMode, onComplete }: MockInterviewScreenProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -62,6 +88,9 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [snapshotCount, setSnapshotCount] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  const [terminated, setTerminated] = useState(false);
+  const [terminateReason, setTerminateReason] = useState<string>('');
+  const [warningCount, setWarningCount] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -96,6 +125,9 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
   const currentUserTextRef = useRef('');
   const currentAssistantMsgIdRef = useRef<string | null>(null);
   const currentUserMsgIdRef = useRef<string | null>(null);
+  const lastAssistantFinalTextRef = useRef(''); // for dedup across turns
+  const warningCountRef = useRef(0);
+  const terminatedRef = useRef(false);
 
   useEffect(() => { micEnabledRef.current = micEnabled; }, [micEnabled]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -231,19 +263,30 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
       'Start by briefly introducing yourself and asking your first question. ' +
       'IMPORTANT: Ask only ONE question at a time and WAIT for the candidate to respond. ' +
       'Do NOT ask multiple questions at once. Listen to their answer, give brief feedback if appropriate, then ask the next question. ' +
+      'CRITICAL: NEVER repeat the same question you already asked. If the candidate gave a vague answer, rephrase your follow-up differently. ' +
       'Weave in the company-tailored questions and gently probe the resume risks above. ' +
       'Keep your responses short — generally two or three sentences. ' +
-      'After 3-4 questions total, wrap up by saying "Thank you, that concludes our interview."';
+      'BEHAVIOR RULES: ' +
+      '- If the candidate is silent for too long, say "Are you still there? Let\'s continue." ONE TIME only. ' +
+      '- If the candidate uses inappropriate/offensive language, give ONE warning: "Please keep this professional. This is your only warning." ' +
+      '- If they continue being inappropriate after the warning, say "I\'m terminating this interview due to unprofessional conduct. Interview is over." and stop. ' +
+      '- If the candidate gives completely nonsensical or off-topic answers for 2+ questions in a row, say "I don\'t think you\'re taking this seriously. This interview is concluded." ' +
+      'After 3-4 good questions total, wrap up by saying "Thank you, that concludes our interview."';
 
     const pressureInstructions =
       'You are a tough, senior interviewer known for aggressive, no-nonsense interviews. ' +
       'Your style: direct, skeptical, push-back on vague answers, demand specifics with follow-ups. ' +
       'Start with a brief cold introduction — no pleasantries — then immediately hit with a hard question. ' +
       'IMPORTANT: Ask only ONE question at a time, but follow up aggressively if the answer is vague. ' +
+      'CRITICAL: NEVER repeat the same question verbatim. If you need to press harder, rephrase differently or move on. ' +
       'Actively probe the resume risks listed above — challenge job-hopping, missing metrics, skill gaps. ' +
       'Use the company-tailored questions. If the candidate gives a generic answer, say "Be more specific" or "That doesn\'t answer my question." ' +
       'Keep responses short and blunt — one or two sentences max. ' +
-      'After 4-5 questions total, wrap up by saying "Thank you, that concludes our interview."';
+      'BEHAVIOR RULES: ' +
+      '- If the candidate uses inappropriate/offensive language, give ONE cold warning: "Watch your language. Final warning." ' +
+      '- If they continue, say "Terminating this interview. Your conduct is unacceptable." and stop. ' +
+      '- If the candidate is clearly not serious or giving gibberish answers, say "This is a waste of time. Interview is over." ' +
+      'After 4-5 good questions total, wrap up by saying "Thank you, that concludes our interview."';
 
     const systemPrompt = baseContext + (interviewMode === 'pressure' ? pressureInstructions : standardInstructions);
 
@@ -281,9 +324,19 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
       else if (data?.role === 'USER') role = 'user';
       else if (data?.contentName) role = contentRoleMapRef.current.get(data.contentName) || null;
 
+      // Filter protocol noise like { "interrupted": true }
+      if (isProtocolNoise(text)) return;
+
       if (role === 'assistant') {
         currentAssistantTextRef.current += text;
         const full = currentAssistantTextRef.current;
+
+        // Skip if this is a duplicate of the last assistant message
+        if (isDuplicateAssistantMsg(messagesRef.current, full)) {
+          // Still accumulate text but don't create/update a bubble
+          return;
+        }
+
         let tid = currentAssistantMsgIdRef.current;
         if (!tid) {
           // First text chunk — create the bubble now (no empty bubble)
@@ -313,13 +366,42 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
     socket.on('contentEnd', (data: { role?: string; contentName?: string }) => {
       if (data?.contentName) contentRoleMapRef.current.delete(data.contentName);
       if (data?.role === 'ASSISTANT') {
+        // Save final text for cross-turn dedup
+        if (currentAssistantTextRef.current.trim()) {
+          lastAssistantFinalTextRef.current = currentAssistantTextRef.current.trim().toLowerCase();
+        }
         currentAssistantMsgIdRef.current = null;
         setIsAiSpeaking(false);
-        if (currentAssistantTextRef.current.toLowerCase().includes('concludes our interview')) {
+
+        // Check for interview conclusion phrases
+        const lower = currentAssistantTextRef.current.toLowerCase();
+        if (lower.includes('concludes our interview') || lower.includes('interview is over') ||
+            lower.includes('terminating this interview') || lower.includes('ending this interview') ||
+            lower.includes('interview has been terminated') || lower.includes('this interview is concluded')) {
           setInterviewEnded(true);
           setTimeout(() => endInterview(), 3000);
         }
-      } else if (data?.role === 'USER') { currentUserMsgIdRef.current = null; }
+
+        // Check for AI-issued warnings about candidate behavior
+        if (lower.includes('final warning') || lower.includes('last chance') || lower.includes('one more chance')) {
+          warningCountRef.current += 1;
+          setWarningCount(warningCountRef.current);
+        }
+      } else if (data?.role === 'USER') {
+        // Check user transcript for inappropriate content or nonsense
+        const userText = currentUserTextRef.current.trim().toLowerCase();
+        if (userText && !terminatedRef.current) {
+          const inappropriatePatterns = /\b(fuck|shit|damn|ass|bitch|dick|pussy|cock|cunt|bastard|wtf|stfu|idiot|stupid|dumb)\b/i;
+          if (inappropriatePatterns.test(userText)) {
+            warningCountRef.current += 1;
+            setWarningCount(warningCountRef.current);
+            if (warningCountRef.current >= 2) {
+              terminateInterview('Inappropriate language detected. Interview terminated.');
+            }
+          }
+        }
+        currentUserMsgIdRef.current = null;
+      }
     });
 
     socket.on('error', (data: { message?: string }) => { setConnectionError(data?.message || 'Unknown server error'); });
@@ -355,6 +437,21 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
     stopEverything();
     setIsRecording(false);
+  };
+
+  const terminateInterview = (reason: string) => {
+    if (terminatedRef.current) return;
+    terminatedRef.current = true;
+    setTerminated(true);
+    setTerminateReason(reason);
+    setInterviewEnded(true);
+    // Add a system-style message
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: `⚠️ ${reason}`,
+      id: nextMsgId(),
+    }]);
+    setTimeout(() => endInterview(), 3000);
   };
 
   const toggleMic = () => {
@@ -429,6 +526,12 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
             <Radio className="w-2.5 h-2.5 text-purple-400" />
             <span className="text-[9px] font-mono text-purple-300/70 tracking-[0.12em] uppercase">Nova 2 Sonic</span>
           </div>
+          {warningCount > 0 && (
+            <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/20">
+              <span className="text-[9px] font-mono text-red-400 tracking-[0.12em] uppercase">⚠ {warningCount}/2 Warning{warningCount > 1 ? 's' : ''}</span>
+            </motion.div>
+          )}
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.02] border border-white/[0.05]">
             <Shield className="w-2.5 h-2.5 text-zinc-600" />
             <span className="text-[9px] font-mono text-zinc-600">{prepData.companyName} · {prepData.roleTitle}</span>
@@ -647,9 +750,21 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
 
             {interviewEnded && (
               <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
-                className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-center">
-                <p className="text-[11px] font-mono font-semibold text-emerald-400">Interview Complete</p>
-                <p className="text-[10px] text-emerald-400/50 mt-0.5">Generating analysis…</p>
+                className={`p-3 rounded-xl border text-center ${terminated
+                  ? 'bg-red-500/5 border-red-500/15'
+                  : 'bg-emerald-500/5 border-emerald-500/15'}`}>
+                <p className={`text-[11px] font-mono font-semibold ${terminated ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {terminated ? '⚠ Interview Terminated' : 'Interview Complete'}
+                </p>
+                <p className={`text-[10px] mt-0.5 ${terminated ? 'text-red-400/50' : 'text-emerald-400/50'}`}>
+                  {terminated ? terminateReason : 'Generating analysis…'}
+                </p>
+                {terminated && (
+                  <button onClick={() => { setTerminated(false); setTerminateReason(''); terminatedRef.current = false; warningCountRef.current = 0; setWarningCount(0); setInterviewEnded(false); setIsRecording(false); setMessages([]); }}
+                    className="mt-2 px-4 py-1.5 rounded-lg bg-purple-600/70 hover:bg-purple-500/80 text-white text-[10px] font-medium transition-all border border-purple-400/15">
+                    Try Again
+                  </button>
+                )}
               </motion.div>
             )}
             <div ref={messagesEndRef} />
