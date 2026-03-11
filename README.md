@@ -37,6 +37,7 @@
 - [Setup & Installation](#-setup--installation)
 - [Running the App](#-running-the-app)
 - [Environment Variables](#-environment-variables)
+- [Why Amazon Nova?](#-why-amazon-nova)
 - [Architecture Deep Dive](#-architecture-deep-dive)
 - [Troubleshooting](#-troubleshooting)
 - [License](#-license)
@@ -62,8 +63,12 @@ No copy-pasting into ChatGPT. No generic question lists. **One flow. Fully perso
 | Feature | Description |
 |---|---|
 | 🎯 **Smart Research** | AI analyzes your resume against the JD, researches the company, and identifies strengths & gaps |
-| 📊 **Prep Pack** | Skills radar chart, fit score, tailored interview plan, and company insights — all in one page |
+| �️ **Resume Risk Detector** | Finds things interviewers will attack (job hopping, vague bullets, missing metrics) and generates defense strategies |
+| 🧠 **Interviewer Brain** | Generates company-tailored questions based on their culture, this JD, and your specific weaknesses |
+| 🎤 **60-Second Elevator Pitch** | AI-generated "Why should we hire you?" answer personalized to your resume + this role |
+| �📊 **Prep Pack** | Skills radar chart, fit score, tailored interview plan, and company insights — all in one page |
 | 🎙️ **Live Voice Interview** | Real-time speech-to-speech mock interview powered by Nova 2 Sonic with automatic turn detection |
+| 🔥 **Pressure Mode** | Toggle aggressive interviewer mode — pushback, follow-ups, stress-testing your answers |
 | 📷 **Webcam Analysis** | Periodic snapshots during the interview capture body language, eye contact, and posture |
 | 📝 **Live Transcript** | Real-time scrolling transcript with role labels (Interviewer / You) |
 | 🧠 **Extended Thinking** | Nova 2 Lite with deep reasoning for nuanced performance analysis |
@@ -96,6 +101,48 @@ No copy-pasting into ChatGPT. No generic question lists. **One flow. Fully perso
 
 - **Nova 2 Lite** — Lightning-fast multimodal model that handles PDFs, images, and text with extended thinking for deep analysis. Perfect for both quick research and thorough post-interview analysis.
 - **Nova 2 Sonic** — Purpose-built for real-time voice conversations. Native speech-to-speech (no STT→LLM→TTS pipeline), sub-second latency, automatic turn detection. Makes the mock interview feel like talking to a real person.
+
+---
+
+## 💡 Why Amazon Nova?
+
+Hireon isn't just *compatible* with Amazon Nova — it's **architecturally impossible** without it. Here's why:
+
+### 🔊 Nova 2 Sonic: The Only Way to Do Real-Time Voice Interviews
+
+Most AI interview tools chain together STT → LLM → TTS — three separate services with compounding latency. The result feels like talking to a chatbot with a 3-second delay.
+
+**Nova 2 Sonic is fundamentally different.** It's a native speech-to-speech model that:
+- Processes audio **bidirectionally** over a single HTTP/2 stream — no orchestration overhead
+- Has **built-in Voice Activity Detection (VAD)** — it knows when you've finished talking without manual endpointing
+- Responds in **sub-second latency** — the mock interview genuinely feels like a conversation with a real person
+- Understands **tone, hesitation, and pacing** natively (not just transcribed text) — critical for evaluating interview performance
+
+**No other foundation model on any cloud platform offers bidirectional speech-to-speech streaming.** OpenAI's Realtime API comes close, but lacks the Bedrock integration, IAM security model, and enterprise-grade infrastructure. Nova 2 Sonic is the reason Hireon's mock interview exists.
+
+### 🧠 Nova 2 Lite: Multimodal Intelligence at Scale
+
+A single model handles **every non-voice AI task** in Hireon:
+- **PDF parsing** — reads resumes and job descriptions natively as documents (not OCR hacks)
+- **Structured JSON generation** — produces typed, parseable output for fit maps, risk analysis, elevator pitches
+- **Image analysis** — evaluates webcam snapshots for body language, eye contact, and posture
+- **Extended Thinking** — enables deep, multi-step reasoning for the post-interview performance report
+
+Other models require separate services for document processing, image analysis, and text generation. Nova 2 Lite does it all in **one API call** with a 1M token context window.
+
+### 🏗️ Why Not OpenAI / Anthropic / Google?
+
+| Capability | Nova 2 | GPT-4o | Claude 3.5 | Gemini 2 |
+|---|---|---|---|---|
+| Native speech-to-speech streaming | ✅ Sonic | ❌ | ❌ | ❌ |
+| Bidirectional audio over HTTP/2 | ✅ | ❌ | ❌ | ❌ |
+| Built-in VAD turn detection | ✅ | ❌ | ❌ | ❌ |
+| PDF document input (native) | ✅ Lite | ✅ | ✅ | ✅ |
+| Image + text + audio in one model family | ✅ | Partial | ❌ | Partial |
+| IAM role auth (no API keys needed in prod) | ✅ | ❌ | ❌ | ❌ |
+| Extended Thinking / deep reasoning | ✅ Lite | ✅ | ✅ | ✅ |
+
+**Bottom line:** Amazon Nova is the only model family that lets you build a **voice-first, multimodal, real-time** application without stitching together 5 different services.
 
 ---
 
@@ -393,6 +440,14 @@ Each state renders a dedicated full-screen component. Data flows forward through
 ## 🏆 Hackathon Category
 
 **Multimodal Understanding** — Hireon processes text (resumes, JDs), documents (PDFs), audio (live speech), and images (webcam snapshots) through Amazon Nova models to deliver a unified, end-to-end interview preparation experience.
+
+### What Makes Hireon Different
+
+- 🛡️ **Resume Risk Detector** — AI thinks like the interviewer, finds your vulnerabilities *before* they do, and arms you with defense strategies
+- 🧠 **Interviewer Brain** — Questions aren't random; they're tailored to the company's culture, this specific JD, and your exact weaknesses
+- 🎤 **60-Second Elevator Pitch** — A ready-to-use "Why should we hire you?" crafted from your resume × their job description
+- 🔥 **Pressure Mode** — Not just a friendly practice interview — toggle aggressive mode for stress-testing under fire
+- 🎙️ **Native Voice** — Nova 2 Sonic's bidirectional speech-to-speech makes this the only interview prep tool where you actually *talk* to the AI in real time
 
 ---
 

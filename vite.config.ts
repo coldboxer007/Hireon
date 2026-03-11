@@ -8,7 +8,11 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      // Only expose the Sonic server URL — never AWS credentials in the frontend
+      // AWS credentials needed for browser-side Bedrock calls (research & analysis)
+      // TODO: In production, proxy these through a backend instead
+      'process.env.AWS_ACCESS_KEY_ID': JSON.stringify(env.AWS_ACCESS_KEY_ID),
+      'process.env.AWS_SECRET_ACCESS_KEY': JSON.stringify(env.AWS_SECRET_ACCESS_KEY),
+      'process.env.AWS_REGION': JSON.stringify(env.AWS_REGION || 'us-east-1'),
       'process.env.SONIC_SERVER_URL': JSON.stringify(env.VITE_SONIC_SERVER_URL || 'http://localhost:3001'),
     },
     resolve: {

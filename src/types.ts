@@ -21,6 +21,7 @@ export interface PrepData {
   interviewPlan: string;
   resumeRisks: ResumeRisk[];
   interviewerQuestions: string[];
+  elevatorPitch: string;
   sources: string[];
 }
 

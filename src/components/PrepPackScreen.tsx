@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { PrepData, InterviewMode } from '../types';
-import { ArrowRight, Target, Zap, AlertTriangle, BookOpen, Activity, Cpu, TrendingUp, Shield, Brain, Flame } from 'lucide-react';
+import { ArrowRight, Target, Zap, AlertTriangle, BookOpen, Activity, Cpu, TrendingUp, Shield, Brain, Flame, MessageCircle } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
@@ -160,6 +160,30 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
                 ))}
               </ul>
             </div>
+
+            {/* 60-Second Elevator Pitch */}
+            {data.elevatorPitch && (
+              <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.03] backdrop-blur-sm p-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 blur-[60px] rounded-full" />
+                <p className="flex items-center gap-2 text-[10px] font-mono text-cyan-400 uppercase tracking-[0.2em] mb-2 relative z-10">
+                  <MessageCircle className="w-3 h-3" /> 60-Second Pitch
+                </p>
+                <p className="text-[10px] text-zinc-600 font-mono mb-4 relative z-10">"Why should we hire you?"</p>
+                <div className="relative z-10 text-sm text-zinc-300 leading-relaxed italic border-l-2 border-cyan-500/30 pl-4">
+                  "{data.elevatorPitch}"
+                </div>
+              </div>
+            )}
+
+            {/* Company Intelligence — moved to left column */}
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-6">
+              <p className="flex items-center gap-2 text-[10px] font-mono text-violet-400 uppercase tracking-[0.2em] mb-4">
+                <TrendingUp className="w-3 h-3" /> Company Intelligence
+              </p>
+              <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-headings:tracking-tight prose-li:text-zinc-300 prose-p:text-zinc-400 prose-sm">
+                <Markdown>{data.companyInsights}</Markdown>
+              </div>
+            </div>
           </motion.div>
 
           {/* Right column */}
@@ -225,16 +249,6 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
               </p>
               <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-headings:tracking-tight prose-a:text-blue-400 prose-li:text-zinc-300 prose-p:text-zinc-400 relative z-10 prose-sm lg:prose-base">
                 <Markdown>{data.interviewPlan}</Markdown>
-              </div>
-            </div>
-
-            {/* Company Intelligence */}
-            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-7 lg:p-9">
-              <p className="flex items-center gap-2 text-[10px] font-mono text-violet-400 uppercase tracking-[0.2em] mb-6">
-                <TrendingUp className="w-3 h-3" /> Company Intelligence
-              </p>
-              <div className="prose prose-invert prose-zinc max-w-none prose-p:leading-relaxed prose-headings:font-medium prose-headings:tracking-tight prose-li:text-zinc-300 prose-p:text-zinc-400 prose-sm lg:prose-base">
-                <Markdown>{data.companyInsights}</Markdown>
               </div>
             </div>
 
