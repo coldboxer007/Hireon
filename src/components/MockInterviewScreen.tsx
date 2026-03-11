@@ -56,8 +56,10 @@ function isDuplicateAssistantMsg(prev: Message[], text: string): boolean {
   for (let i = prev.length - 1; i >= 0; i--) {
     if (prev[i].role === 'assistant') {
       const prevTrimmed = prev[i].content.trim().toLowerCase();
-      // Exact match or one is a prefix of the other (streaming partial repeat)
-      if (prevTrimmed === trimmed || prevTrimmed.startsWith(trimmed) || trimmed.startsWith(prevTrimmed)) return true;
+      // Exact match
+      if (prevTrimmed === trimmed) return true;
+      // Fuzzy — share the first 40 chars (catches rephrased repeats from Sonic)
+      if (prevTrimmed.length > 40 && trimmed.length > 40 && prevTrimmed.substring(0, 40) === trimmed.substring(0, 40)) return true;
       break; // only compare with the most recent assistant message
     }
   }
@@ -366,24 +368,41 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
     socket.on('contentEnd', (data: { role?: string; contentName?: string }) => {
       if (data?.contentName) contentRoleMapRef.current.delete(data.contentName);
       if (data?.role === 'ASSISTANT') {
+        const finalText = currentAssistantTextRef.current.trim();
+        const finalLower = finalText.toLowerCase();
+        const currentBubbleId = currentAssistantMsgIdRef.current;
+
+        // ── Retroactive dedup: if this completed turn matches the previous assistant msg, delete the bubble
+        if (currentBubbleId && lastAssistantFinalTextRef.current) {
+          const prevLower = lastAssistantFinalTextRef.current;
+          const isDupe = (prevLower === finalLower) ||
+            (prevLower.length > 40 && finalLower.length > 40 && prevLower.substring(0, 40) === finalLower.substring(0, 40));
+          if (isDupe) {
+            setMessages(prev => prev.filter(m => m.id !== currentBubbleId));
+            currentAssistantMsgIdRef.current = null;
+            setIsAiSpeaking(false);
+            return; // skip all further processing for this duplicate turn
+          }
+        }
+
         // Save final text for cross-turn dedup
-        if (currentAssistantTextRef.current.trim()) {
-          lastAssistantFinalTextRef.current = currentAssistantTextRef.current.trim().toLowerCase();
+        if (finalText) {
+          lastAssistantFinalTextRef.current = finalLower;
         }
         currentAssistantMsgIdRef.current = null;
         setIsAiSpeaking(false);
 
         // Check for interview conclusion phrases
-        const lower = currentAssistantTextRef.current.toLowerCase();
-        if (lower.includes('concludes our interview') || lower.includes('interview is over') ||
-            lower.includes('terminating this interview') || lower.includes('ending this interview') ||
-            lower.includes('interview has been terminated') || lower.includes('this interview is concluded')) {
-          setInterviewEnded(true);
-          setTimeout(() => endInterview(), 3000);
+        if (finalLower.includes('concludes our interview') || finalLower.includes('interview is over') ||
+            finalLower.includes('terminating this interview') || finalLower.includes('ending this interview') ||
+            finalLower.includes('interview has been terminated') || finalLower.includes('this interview is concluded') ||
+            finalLower.includes('conduct is unacceptable') || finalLower.includes('waste of time')) {
+          terminateInterview(finalText.length > 120 ? finalText.slice(0, 120) + '…' : finalText);
         }
 
         // Check for AI-issued warnings about candidate behavior
-        if (lower.includes('final warning') || lower.includes('last chance') || lower.includes('one more chance')) {
+        if (finalLower.includes('final warning') || finalLower.includes('last chance') || finalLower.includes('one more chance') ||
+            finalLower.includes('only warning') || finalLower.includes('watch your language') || finalLower.includes('keep this professional')) {
           warningCountRef.current += 1;
           setWarningCount(warningCountRef.current);
         }
@@ -445,13 +464,53 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
     setTerminated(true);
     setTerminateReason(reason);
     setInterviewEnded(true);
-    // Add a system-style message
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: `⚠️ ${reason}`,
-      id: nextMsgId(),
-    }]);
-    setTimeout(() => endInterview(), 3000);
+    setIsAiSpeaking(false);
+
+    // Stop the sonic session and audio, but do NOT trigger mediaRecorder.stop()
+    // (that would fire onComplete and transition away before user sees the banner)
+    if (socketRef.current) { socketRef.current.emit('endSession'); socketRef.current.disconnect(); socketRef.current = null; }
+    if (sourceNodeRef.current) { try { sourceNodeRef.current.disconnect(); } catch {} sourceNodeRef.current = null; }
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') { audioContextRef.current.close(); audioContextRef.current = null; }
+    if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') { playbackContextRef.current.close(); playbackContextRef.current = null; }
+    if (snapshotIntervalRef.current) { clearInterval(snapshotIntervalRef.current); snapshotIntervalRef.current = null; }
+    if (elapsedIntervalRef.current) { clearInterval(elapsedIntervalRef.current); elapsedIntervalRef.current = null; }
+    if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+    setIsRecording(false);
+  };
+
+  const handleTerminatedTryAgain = () => {
+    // Reset all state so user can start fresh
+    setTerminated(false);
+    setTerminateReason('');
+    terminatedRef.current = false;
+    warningCountRef.current = 0;
+    setWarningCount(0);
+    setInterviewEnded(false);
+    setIsRecording(false);
+    setMessages([]);
+    lastAssistantFinalTextRef.current = '';
+    // Stop media recorder without triggering onComplete
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      try { mediaRecorderRef.current.stop(); } catch {}
+      mediaRecorderRef.current = null;
+    }
+    recordedChunksRef.current = [];
+    snapshotsRef.current = [];
+  };
+
+  const handleTerminatedViewResults = () => {
+    // Proceed to analysis with whatever we have
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop(); // triggers onstop → onComplete
+    } else {
+      // MediaRecorder already stopped, build blob manually
+      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const transcript = messagesRef.current.map(m => (m.role === 'assistant' ? 'AI' : 'You') + ': ' + m.content).join('\n\n');
+      onComplete(blob, transcript, snapshotsRef.current);
+    }
   };
 
   const toggleMic = () => {
@@ -496,6 +555,86 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
           />
         ))}
       </div>
+
+      {/* ── FULL-SCREEN TERMINATION OVERLAY ── */}
+      <AnimatePresence>
+        {terminated && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-xl"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="max-w-md w-full mx-4 p-8 rounded-2xl bg-[#0a0a14] border border-red-500/20 shadow-[0_0_60px_rgba(239,68,68,0.15)] text-center"
+            >
+              {/* Red pulse icon */}
+              <div className="relative w-16 h-16 mx-auto mb-5">
+                <motion.div
+                  animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0.6, 0.3] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="absolute inset-0 rounded-full bg-red-500/20"
+                />
+                <div className="absolute inset-0 rounded-full bg-red-500/10 flex items-center justify-center border border-red-500/30">
+                  <Square className="w-6 h-6 text-red-400 fill-current" />
+                </div>
+              </div>
+
+              <h2 className="text-xl font-bold text-red-400 mb-2">Interview Terminated</h2>
+              <p className="text-sm text-zinc-400 leading-relaxed mb-6 max-w-xs mx-auto">
+                {terminateReason}
+              </p>
+
+              {/* Stats */}
+              <div className="flex items-center justify-center gap-6 mb-8 text-[10px] font-mono text-zinc-600">
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-zinc-400 text-lg tabular-nums">{fmt(elapsed)}</span>
+                  <span className="uppercase tracking-[0.15em]">Duration</span>
+                </div>
+                <div className="w-px h-8 bg-white/[0.06]" />
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-zinc-400 text-lg tabular-nums">{messages.filter(m => m.role === 'user').length}</span>
+                  <span className="uppercase tracking-[0.15em]">Responses</span>
+                </div>
+                <div className="w-px h-8 bg-white/[0.06]" />
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-red-400 text-lg tabular-nums">{warningCount}</span>
+                  <span className="uppercase tracking-[0.15em]">Warnings</span>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleTerminatedTryAgain}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold text-sm
+                    hover:from-purple-500 hover:to-blue-500 transition-all duration-200
+                    shadow-[0_0_24px_rgba(139,92,246,0.25)] hover:shadow-[0_0_32px_rgba(139,92,246,0.4)]
+                    flex items-center justify-center gap-2 border border-white/[0.06]"
+                >
+                  <Mic className="w-4 h-4" />
+                  Try Again
+                </button>
+                <button
+                  onClick={handleTerminatedViewResults}
+                  className="w-full py-3 rounded-xl bg-white/[0.04] text-zinc-300 font-medium text-sm
+                    hover:bg-white/[0.08] transition-all duration-200
+                    flex items-center justify-center gap-2 border border-white/[0.06]"
+                >
+                  View Results Anyway
+                </button>
+              </div>
+
+              <p className="text-[10px] text-zinc-700 mt-4 font-mono">
+                Tip: Stay professional and answer questions thoughtfully for best results.
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Header */}
       <header className="relative z-20 h-12 flex items-center justify-between px-4 border-b border-white/[0.04] bg-black/60 backdrop-blur-xl shrink-0">
@@ -748,23 +887,11 @@ export default function MockInterviewScreen({ prepData, interviewMode, onComplet
               )}
             </AnimatePresence>
 
-            {interviewEnded && (
+            {interviewEnded && !terminated && (
               <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
-                className={`p-3 rounded-xl border text-center ${terminated
-                  ? 'bg-red-500/5 border-red-500/15'
-                  : 'bg-emerald-500/5 border-emerald-500/15'}`}>
-                <p className={`text-[11px] font-mono font-semibold ${terminated ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {terminated ? '⚠ Interview Terminated' : 'Interview Complete'}
-                </p>
-                <p className={`text-[10px] mt-0.5 ${terminated ? 'text-red-400/50' : 'text-emerald-400/50'}`}>
-                  {terminated ? terminateReason : 'Generating analysis…'}
-                </p>
-                {terminated && (
-                  <button onClick={() => { setTerminated(false); setTerminateReason(''); terminatedRef.current = false; warningCountRef.current = 0; setWarningCount(0); setInterviewEnded(false); setIsRecording(false); setMessages([]); }}
-                    className="mt-2 px-4 py-1.5 rounded-lg bg-purple-600/70 hover:bg-purple-500/80 text-white text-[10px] font-medium transition-all border border-purple-400/15">
-                    Try Again
-                  </button>
-                )}
+                className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-center">
+                <p className="text-[11px] font-mono font-semibold text-emerald-400">Interview Complete</p>
+                <p className="text-[10px] text-emerald-400/50 mt-0.5">Generating analysis…</p>
               </motion.div>
             )}
             <div ref={messagesEndRef} />
