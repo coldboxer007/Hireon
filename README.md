@@ -63,12 +63,15 @@ No copy-pasting into ChatGPT. No generic question lists. **One flow. Fully perso
 | Feature | Description |
 |---|---|
 | 🎯 **Smart Research** | AI analyzes your resume against the JD, researches the company, and identifies strengths & gaps |
-| �️ **Resume Risk Detector** | Finds things interviewers will attack (job hopping, vague bullets, missing metrics) and generates defense strategies |
+| 🛡️ **Resume Risk Detector** | Finds things interviewers will attack (job hopping, vague bullets, missing metrics) and generates defense strategies |
 | 🧠 **Interviewer Brain** | Generates company-tailored questions based on their culture, this JD, and your specific weaknesses |
 | 🎤 **60-Second Elevator Pitch** | AI-generated "Why should we hire you?" answer personalized to your resume + this role |
-| �📊 **Prep Pack** | Skills radar chart, fit score, tailored interview plan, and company insights — all in one page |
+| 📊 **Prep Pack** | Skills radar chart, fit score, tailored interview plan, and company insights — all in one page |
 | 🎙️ **Live Voice Interview** | Real-time speech-to-speech mock interview powered by Nova 2 Sonic with automatic turn detection |
 | 🔥 **Pressure Mode** | Toggle aggressive interviewer mode — pushback, follow-ups, stress-testing your answers |
+| ⚠️ **Interview Termination System** | AI ends the interview if you use inappropriate language, go off-topic, or aren't taking it seriously — full-screen overlay with "Try Again" or "View Results Anyway" |
+| 🚫 **Profanity / Behavior Guard** | Client-side warning counter (2 strikes) terminates the interview independently of the AI, with a header badge tracking your warning status |
+| 🔄 **Transcript Dedup Engine** | Retroactive dedup removes repeated AI bubbles caused by Sonic interruption cycles; protocol noise (`{ "interrupted": true }`) is filtered automatically |
 | 📷 **Webcam Analysis** | Periodic snapshots during the interview capture body language, eye contact, and posture |
 | 📝 **Live Transcript** | Real-time scrolling transcript with role labels (Interviewer / You) |
 | 🧠 **Extended Thinking** | Nova 2 Lite with deep reasoning for nuanced performance analysis |
@@ -422,6 +425,24 @@ Each state renders a dedicated full-screen component. Data flows forward through
 - If the terminal process gets suspended (SIGSTOP), use VS Code Tasks instead of background terminal processes
 - Run via: `Cmd+Shift+P` → `Tasks: Run Task` → **Dev Server**
 
+### Transcript Shows Repeated Interviewer Messages
+
+This is caused by Nova Sonic repeating a turn after an interruption. Hireon has a **retroactive dedup engine** that:
+1. During streaming — suppresses new bubbles if the first 40 chars match the previous assistant message
+2. At `contentEnd` — deletes the completed bubble if its final text matches the last saved turn
+
+If you still see duplicates in an edge case, hard-refresh (`Cmd+Shift+R`) — it only affects the current session's transcript.
+
+### Interview Terminated Unexpectedly
+
+The interview can be terminated by:
+- **The AI** — if you use inappropriate language (after 1 warning), give completely nonsensical answers for multiple questions, or say something like "shut up" / "just shut up"
+- **The client** — if profanity is detected in your transcribed speech for a 2nd time
+
+After termination, a full-screen overlay appears with:
+- **Try Again** — resets everything and returns to the "Start Voice Interview" button (no results generated)
+- **View Results Anyway** — proceeds to the analysis screen with whatever transcript was captured
+
 ---
 
 ## 📄 NPM Scripts
@@ -448,6 +469,8 @@ Each state renders a dedicated full-screen component. Data flows forward through
 - 🎤 **60-Second Elevator Pitch** — A ready-to-use "Why should we hire you?" crafted from your resume × their job description
 - 🔥 **Pressure Mode** — Not just a friendly practice interview — toggle aggressive mode for stress-testing under fire
 - 🎙️ **Native Voice** — Nova 2 Sonic's bidirectional speech-to-speech makes this the only interview prep tool where you actually *talk* to the AI in real time
+- ⚠️ **Interview Termination System** — The AI (and the client) will end the interview if you use inappropriate language or aren't taking it seriously — with a professional termination screen offering "Try Again" or "View Results Anyway"
+- 🔄 **Transcript Dedup Engine** — Retroactive deduplication ensures each AI statement appears exactly once, even when Nova Sonic repeats after an interruption cycle
 
 ---
 
