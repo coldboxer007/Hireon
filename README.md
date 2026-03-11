@@ -1,14 +1,18 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Hireeon-Your%20Unfair%20Interview%20Advantage-blueviolet?style=for-the-badge&labelColor=0d0d0d" />
+  <img src="public/logo.png" alt="Hireon Logo" width="160" />
 </p>
 
-<h1 align="center">Hireeon</h1>
+<h1 align="center">Hireon</h1>
 <p align="center"><strong>Your Unfair Interview Advantage</strong></p>
 
 <p align="center">
   An AI-powered interview preparation platform that researches the company, builds a personalized prep pack,<br/>
   conducts a live voice mock interview, and delivers a comprehensive performance report —<br/>
   all powered by <strong>Amazon Nova</strong> foundation models on <strong>AWS Bedrock</strong>.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Hireon-Your%20Unfair%20Interview%20Advantage-blueviolet?style=for-the-badge&labelColor=0d0d0d" />
 </p>
 
 <p align="center">
@@ -41,7 +45,7 @@
 
 ## 🧠 Overview
 
-**Hireeon** is a full-stack, AI-native interview preparation tool. Upload your resume and a job description, and Hireeon will:
+**Hireon** is a full-stack, AI-native interview preparation tool. Upload your resume and a job description, and Hireon will:
 
 1. **Research** the target company and role using AI
 2. **Generate** a personalized prep pack with fit analysis, skills radar, and an interview game plan
@@ -114,7 +118,7 @@ No copy-pasting into ChatGPT. No generic question lists. **One flow. Fully perso
 ## 📁 Project Structure
 
 ```
-InterviewIntelligence/
+Hireon/
 ├── index.html                  # Entry HTML — loads the React app
 ├── package.json                # Dependencies and npm scripts
 ├── tsconfig.json               # TypeScript configuration
@@ -199,8 +203,8 @@ git --version   # Any recent version works
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/coldboxer007/InterviewIntelligence.git
-cd InterviewIntelligence
+git clone https://github.com/coldboxer007/Hireon.git
+cd Hireon
 ```
 
 ### Step 2: Install Dependencies
@@ -261,7 +265,7 @@ This starts the Express + Socket.IO server at **http://localhost:3001**, which p
 
 ### Open in Browser
 
-Navigate to **http://localhost:3000** — you'll see the Hireeon landing page.
+Navigate to **http://localhost:3000** — you'll see the Hireon landing page.
 
 > **💡 Tip:** If using VS Code, you can use the preconfigured tasks:
 > - `Cmd+Shift+P` → `Tasks: Run Task` → **Dev Server**
@@ -280,10 +284,11 @@ Navigate to **http://localhost:3000** — you'll see the Hireeon landing page.
 
 ### How Credentials Are Used
 
-- **Frontend (Vite):** AWS credentials are injected at build time via `vite.config.ts` using `process.env.*` defines. This allows the browser-side Bedrock client to make direct API calls for research and analysis.
+- **Frontend (Vite):** The frontend only receives `VITE_SONIC_SERVER_URL` at build time — AWS credentials are **never** exposed to the browser.
 - **Sonic Server:** Reads credentials from `.env` via `dotenv`. The Express server uses them to establish HTTP/2 bidirectional streams with Nova 2 Sonic.
+- **Frontend Bedrock calls** (research & analysis): Made directly from the browser using credentials read at runtime from the server, or via IAM role in production.
 
-> **⚠️ Production Note:** For production deployments, use IAM roles, Cognito identity pools, or a backend proxy instead of injecting credentials into the frontend bundle.
+> **⚠️ Production Note:** For production deployments, use IAM roles on EC2/App Runner — no credentials in `.env` needed at all.
 
 ---
 
@@ -318,7 +323,7 @@ Each state renders a dedicated full-screen component. Data flows forward through
 
 - **Browser** captures microphone audio via `MediaRecorder` (webm/opus), sends base64 chunks over Socket.IO
 - **Sonic Server** maintains a persistent HTTP/2 bidirectional stream to Bedrock, forwarding audio events and receiving AI audio + transcript responses
-- **Turn Detection** is handled natively by Nova 2 Sonic's VAD (Voice Activity Detection) with `endpointingSensitivity: 'HIGH'`
+- **Turn Detection** is handled natively by Nova 2 Sonic's VAD (Voice Activity Detection) with `endpointingSensitivity: 'MEDIUM'`
 - **Gapless Playback** — the client queues audio chunks and plays them sequentially for smooth speech
 
 ### Analysis Phase (`AnalyzingScreen.tsx`)
@@ -358,7 +363,7 @@ Each state renders a dedicated full-screen component. Data flows forward through
 ### Video/Camera Not Working
 
 - Allow camera and microphone permissions when the browser prompts
-- Hireeon requires HTTPS or `localhost` for `getUserMedia` — it won't work on plain HTTP with a non-localhost domain
+- Hireon requires HTTPS or `localhost` for `getUserMedia` — it won't work on plain HTTP with a non-localhost domain
 
 ### Transcript Not Scrolling / Layout Issues
 
@@ -387,7 +392,7 @@ Each state renders a dedicated full-screen component. Data flows forward through
 
 ## 🏆 Hackathon Category
 
-**Multimodal Understanding** — Hireeon processes text (resumes, JDs), documents (PDFs), audio (live speech), and images (webcam snapshots) through Amazon Nova models to deliver a unified, end-to-end interview preparation experience.
+**Multimodal Understanding** — Hireon processes text (resumes, JDs), documents (PDFs), audio (live speech), and images (webcam snapshots) through Amazon Nova models to deliver a unified, end-to-end interview preparation experience.
 
 ---
 
@@ -398,5 +403,5 @@ MIT
 ---
 
 <p align="center">
-  Built with ☕ and Amazon Nova · <strong>Hireeon</strong> — Your Unfair Interview Advantage
+  Built with ☕ and Amazon Nova · <strong>Hireon</strong> — Your Unfair Interview Advantage
 </p>
