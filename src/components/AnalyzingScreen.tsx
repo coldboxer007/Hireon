@@ -168,7 +168,7 @@ Generate a comprehensive performance report. Return ONLY a valid JSON object mat
             Analyzing Performance
           </h2>
           <p className="text-blue-400/80 font-mono text-xs uppercase tracking-widest">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400 font-semibold normal-case tracking-tight text-sm">Hireeon</span>
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400 font-semibold normal-case tracking-tight text-sm">Hireon</span>
             {' · '}Nova 2 Lite · Extended Thinking
           </p>
           {framesUsed > 0 && (

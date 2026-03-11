@@ -35,8 +35,9 @@ export default function ReportScreen({ data, onRestart }: ReportScreenProps) {
               <Activity className="w-4 h-4" />
               <span>Analysis Complete</span>
             </div>
-            <h1 className="text-4xl lg:text-6xl font-sans font-medium tracking-tight text-white">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireeon</span> Report
+            <h1 className="text-4xl lg:text-6xl font-sans font-medium tracking-tight text-white flex items-center gap-4 justify-center">
+              <img src="/logo.png" alt="Hireon" className="w-12 h-12 object-contain" />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireon</span> Report
             </h1>
             <p className="text-xl text-zinc-400 font-light">
               Your readiness score and tonight's crash plan.

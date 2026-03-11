@@ -30,7 +30,7 @@ function base64ToFloat32(base64: string): Float32Array {
 }
 
 /* ── Constants ───────────────────────────────────────────────────────────── */
-const SONIC_SERVER_URL = 'http://localhost:3001';
+const SONIC_SERVER_URL = process.env.SONIC_SERVER_URL || 'http://localhost:3001';
 
 interface MockInterviewScreenProps {
   prepData: PrepData;
@@ -141,7 +141,8 @@ export default function MockInterviewScreen({ prepData, onComplete }: MockInterv
       src.buffer = buffer;
       src.connect(ctx.destination);
       const now = ctx.currentTime;
-      if (nextPlayTimeRef.current <= now) nextPlayTimeRef.current = now + 0.005;
+      // 40ms lookahead — enough to absorb network jitter without audible delay
+      if (nextPlayTimeRef.current < now + 0.04) nextPlayTimeRef.current = now + 0.04;
       src.start(nextPlayTimeRef.current);
       nextPlayTimeRef.current += buffer.duration;
     }
@@ -150,7 +151,10 @@ export default function MockInterviewScreen({ prepData, onComplete }: MockInterv
 
   const enqueueAudio = useCallback((b64: string) => {
     audioQueueRef.current.push(base64ToFloat32(b64));
-    if (!drainScheduledRef.current) { drainScheduledRef.current = true; queueMicrotask(drainAudioQueue); }
+    if (!drainScheduledRef.current) {
+      drainScheduledRef.current = true;
+      drainAudioQueue(); // call directly — no extra tick of latency
+    }
   }, [drainAudioQueue]);
 
   /* ── Start interview ───────────────────────────────────────────────── */
@@ -308,14 +312,12 @@ export default function MockInterviewScreen({ prepData, onComplete }: MockInterv
     audioContextRef.current = audioCtx;
     const source = audioCtx.createMediaStreamSource(streamRef.current);
     sourceNodeRef.current = source;
-    const processor = audioCtx.createScriptProcessor(1024, 1, 1);
+    // 4096 buffer = ~256ms chunks — reduces socket emission frequency and jitter
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
     processorRef.current = processor;
     processor.onaudioprocess = (e) => {
       if (!micEnabledRef.current) return;
-      const inp = e.inputBuffer.getChannelData(0);
-      const copy = new Float32Array(inp.length);
-      copy.set(inp);
-      socket.emit('audioChunk', float32ToBase64_16k(copy));
+      socket.emit('audioChunk', float32ToBase64_16k(e.inputBuffer.getChannelData(0)));
     };
     source.connect(processor);
     processor.connect(audioCtx.destination);
@@ -382,7 +384,8 @@ export default function MockInterviewScreen({ prepData, onComplete }: MockInterv
       {/* Header */}
       <header className="relative z-20 h-12 flex items-center justify-between px-4 border-b border-white/[0.04] bg-black/60 backdrop-blur-xl shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireeon</span>
+          <img src="/logo.png" alt="Hireon" className="w-6 h-6 object-contain" />
+          <span className="text-sm font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireon</span>
           <div className="w-px h-4 bg-white/[0.08]" />
           {isRecording ? (
             <div className="flex items-center gap-1.5">

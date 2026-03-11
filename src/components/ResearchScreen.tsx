@@ -159,7 +159,7 @@ export default function ResearchScreen({ resume, jd, onComplete }: ResearchScree
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/20 bg-blue-500/8 text-blue-400 text-[10px] font-mono uppercase tracking-widest">
             <Cpu className="w-3 h-3" />
-            Hireeon · Nova 2 Lite
+            Hireon · Nova 2 Lite
           </div>
           <h2 className="text-3xl font-light tracking-tight text-white">
             Analyzing Your Profile

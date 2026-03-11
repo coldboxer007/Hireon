@@ -97,7 +97,7 @@ const bedrockClient = new BedrockRuntimeClient({
     requestTimeout:          300_000,
     sessionTimeout:          300_000,
     disableConcurrentStreams: false,
-    maxConcurrentStreams:     20,
+    maxConcurrentStreams:     100,
   }),
 });
 
@@ -118,11 +118,11 @@ io.on('connection', (socket) => {
     session = createSession();
     const s = session;
 
-    // 1. sessionStart — turnDetectionConfiguration enables VAD-based turn-taking
+    // 1. sessionStart — VAD-based turn-taking, tuned for low latency
     pushEvent(s, { event: { sessionStart: {
-      inferenceConfiguration: { maxTokens: 1024, topP: 0.9, temperature: 0.7 },
+      inferenceConfiguration: { maxTokens: 400, topP: 0.95, temperature: 0.5 },
       turnDetectionConfiguration: {
-        endpointingSensitivity: 'HIGH',
+        endpointingSensitivity: 'MEDIUM',
       },
     }}});
 

@@ -1,5 +1,5 @@
 {
-  "name": "Hireeon — Your Unfair Interview Advantage",
+  "name": "Hireon — Your Unfair Interview Advantage",
   "description": "AI-powered interview preparation platform using Amazon Nova foundation models for research, live voice mock interviews, and performance analysis.",
   "requestFramePermissions": ["camera", "microphone"]
 }

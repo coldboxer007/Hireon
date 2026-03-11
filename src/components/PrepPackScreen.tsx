@@ -37,7 +37,8 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
         {/* Model badge row */}
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
           className="flex flex-wrap items-center justify-center gap-2">
-          <span className="text-sm font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireeon</span>
+          <img src="/logo.png" alt="Hireon" className="w-6 h-6 object-contain" />
+          <span className="text-sm font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">Hireon</span>
           <span className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest">powered by</span>
           {[
             { label: 'Nova 2 Lite · Research', icon: Cpu, color: 'blue' },

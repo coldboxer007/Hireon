@@ -74,18 +74,25 @@ export default function InputScreen({ onComplete }: InputScreenProps) {
             Your Unfair Interview Advantage
           </motion.div>
 
-          <motion.h1
+          <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, delay: 0.08 }}
-            className="text-5xl lg:text-[5.5rem] font-light tracking-[-0.03em] text-white leading-[1.05]"
+            className="flex flex-col items-center gap-4"
           >
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400 font-semibold">Hireeon</span>
-            <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-zinc-400 via-zinc-300 to-zinc-500 text-4xl lg:text-5xl">
-              Nail Every Interview.
-            </span>
-          </motion.h1>
+            <img
+              src="/logo.png"
+              alt="Hireon"
+              className="w-32 h-32 lg:w-40 lg:h-40 object-contain drop-shadow-[0_0_32px_rgba(139,92,246,0.45)]"
+            />
+            <div className="text-5xl lg:text-[5.5rem] font-light tracking-[-0.03em] text-white leading-[1.05] text-center">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400 font-semibold">Hireon</span>
+              <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-zinc-400 via-zinc-300 to-zinc-500 text-4xl lg:text-5xl">
+                Nail Every Interview.
+              </span>
+            </div>
+          </motion.div>
 
           <motion.p
             initial={{ opacity: 0, y: 12 }}
@@ -93,7 +100,7 @@ export default function InputScreen({ onComplete }: InputScreenProps) {
             transition={{ duration: 0.5, delay: 0.16 }}
             className="text-base text-zinc-500 max-w-xl mx-auto leading-relaxed"
           >
-            Upload your resume and job description. Hireeon researches the company, maps your fit, and runs a live AI mock interview — powered by Amazon Nova.
+            Upload your resume and job description. Hireon researches the company, maps your fit, and runs a live AI mock interview — powered by Amazon Nova.
           </motion.p>
         </div>
 
