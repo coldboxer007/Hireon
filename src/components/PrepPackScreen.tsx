@@ -1,15 +1,17 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
-import { PrepData } from '../types';
-import { ArrowRight, Target, Zap, AlertTriangle, BookOpen, Activity, Cpu, TrendingUp } from 'lucide-react';
+import { PrepData, InterviewMode } from '../types';
+import { ArrowRight, Target, Zap, AlertTriangle, BookOpen, Activity, Cpu, TrendingUp, Shield, Brain, Flame } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface PrepPackScreenProps {
   data: PrepData;
-  onStartInterview: () => void;
+  onStartInterview: (mode: InterviewMode) => void;
 }
 
 export default function PrepPackScreen({ data, onStartInterview }: PrepPackScreenProps) {
+  const [interviewMode, setInterviewMode] = useState<InterviewMode>('standard');
   const hasSkills = data.fitMap?.skillsAnalysis && data.fitMap.skillsAnalysis.length > 0;
   const score = data.fitMap.alignmentScore;
   const scoreColor = score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-amber-400' : 'text-red-400';
@@ -71,7 +73,7 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
             </p>
           </div>
 
-          <button onClick={onStartInterview}
+          <button onClick={() => onStartInterview(interviewMode)}
             className="group flex items-center gap-3 px-8 py-4 rounded-full bg-white text-black font-medium text-base transition-all duration-300 hover:bg-zinc-100 hover:scale-[1.03] shadow-[0_0_50px_rgba(255,255,255,0.1)] hover:shadow-[0_0_60px_rgba(255,255,255,0.18)] shrink-0 self-start md:self-auto">
             Enter Mock Interview
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
@@ -164,6 +166,57 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.15 }}
             className="lg:col-span-8 space-y-5">
 
+            {/* Resume Risk Detector */}
+            {data.resumeRisks && data.resumeRisks.length > 0 && (
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.03] backdrop-blur-sm p-7 lg:p-9 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-60 h-60 bg-red-500/5 blur-[80px] rounded-full" />
+                <p className="flex items-center gap-2 text-[10px] font-mono text-red-400 uppercase tracking-[0.2em] mb-6 relative z-10">
+                  <Shield className="w-3 h-3" /> Resume Risk Detector
+                </p>
+                <p className="text-xs text-zinc-500 mb-5 relative z-10">Things interviewers might challenge — with your defense strategies.</p>
+                <ul className="space-y-4 relative z-10">
+                  {data.resumeRisks.map((r, i) => (
+                    <motion.li key={i} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.08 }}
+                      className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-4 space-y-2">
+                      <div className="flex items-start gap-3">
+                        <span className={`shrink-0 mt-0.5 inline-flex items-center px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider
+                          ${r.severity === 'high' ? 'bg-red-500/15 text-red-400 border border-red-500/30'
+                          : r.severity === 'medium' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                          : 'bg-zinc-500/15 text-zinc-400 border border-zinc-500/30'}`}>
+                          {r.severity}
+                        </span>
+                        <span className="text-sm text-zinc-200">{r.risk}</span>
+                      </div>
+                      <div className="flex items-start gap-2 ml-0.5 pl-4 border-l-2 border-emerald-500/30">
+                        <span className="text-xs text-emerald-400 font-mono shrink-0">Defense →</span>
+                        <span className="text-xs text-zinc-400 leading-relaxed">{r.defense}</span>
+                      </div>
+                    </motion.li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Interviewer Brain — Predicted Questions */}
+            {data.interviewerQuestions && data.interviewerQuestions.length > 0 && (
+              <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.03] backdrop-blur-sm p-7 lg:p-9 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-60 h-60 bg-violet-500/5 blur-[80px] rounded-full" />
+                <p className="flex items-center gap-2 text-[10px] font-mono text-violet-400 uppercase tracking-[0.2em] mb-2 relative z-10">
+                  <Brain className="w-3 h-3" /> Interviewer Brain
+                </p>
+                <p className="text-xs text-zinc-500 mb-5 relative z-10">Predicted questions based on {data.companyName}'s culture, this JD, and your profile.</p>
+                <ol className="space-y-3 relative z-10">
+                  {data.interviewerQuestions.map((q, i) => (
+                    <motion.li key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.06 }}
+                      className="flex gap-3 text-sm text-zinc-300 leading-relaxed">
+                      <span className="shrink-0 w-5 h-5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-400 text-[10px] font-mono flex items-center justify-center mt-0.5">{i + 1}</span>
+                      {q}
+                    </motion.li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
             {/* Interview Plan */}
             <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 backdrop-blur-sm p-7 lg:p-9 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-60 h-60 bg-blue-500/4 blur-[80px] rounded-full" />
@@ -185,18 +238,59 @@ export default function PrepPackScreen({ data, onStartInterview }: PrepPackScree
               </div>
             </div>
 
-            {/* Bottom CTA */}
+            {/* Interview Mode Selector + CTA */}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
-              className="rounded-2xl border border-zinc-800/40 bg-gradient-to-r from-zinc-900/60 to-zinc-900/30 p-6 flex flex-col sm:flex-row items-center justify-between gap-5">
+              className="rounded-2xl border border-zinc-800/40 bg-gradient-to-r from-zinc-900/60 to-zinc-900/30 p-6 space-y-5">
+
+              {/* Mode toggle */}
               <div>
-                <p className="text-sm font-medium text-zinc-200">Ready for the mock interview?</p>
-                <p className="text-xs text-zinc-600 font-mono mt-0.5">Nova 2 Sonic will conduct a live speech-to-speech session</p>
+                <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest mb-3">Interview Mode</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setInterviewMode('standard')}
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all duration-300
+                      ${interviewMode === 'standard'
+                        ? 'border-blue-500/50 bg-blue-500/10 text-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
+                        : 'border-zinc-800 bg-zinc-900/30 text-zinc-500 hover:border-zinc-700 hover:text-zinc-400'
+                      }`}
+                  >
+                    <Activity className="w-4 h-4" />
+                    Standard
+                  </button>
+                  <button
+                    onClick={() => setInterviewMode('pressure')}
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all duration-300
+                      ${interviewMode === 'pressure'
+                        ? 'border-red-500/50 bg-red-500/10 text-red-400 shadow-[0_0_20px_rgba(239,68,68,0.15)]'
+                        : 'border-zinc-800 bg-zinc-900/30 text-zinc-500 hover:border-zinc-700 hover:text-zinc-400'
+                      }`}
+                  >
+                    <Flame className="w-4 h-4" />
+                    Pressure 🔥
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-600 font-mono mt-2">
+                  {interviewMode === 'standard'
+                    ? 'Realistic interview — balanced pace, constructive feedback'
+                    : '⚠ Aggressive interviewer — pushback, follow-ups, stress-testing your answers'}
+                </p>
               </div>
-              <button onClick={onStartInterview}
-                className="group flex items-center gap-2.5 px-7 py-3.5 rounded-full bg-white text-black font-medium text-sm transition-all duration-300 hover:bg-zinc-100 hover:scale-[1.03] shadow-[0_0_40px_rgba(255,255,255,0.1)] shrink-0">
-                Start Interview
-                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-              </button>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-5">
+                <div>
+                  <p className="text-sm font-medium text-zinc-200">Ready for the mock interview?</p>
+                  <p className="text-xs text-zinc-600 font-mono mt-0.5">Nova 2 Sonic will conduct a live speech-to-speech session</p>
+                </div>
+                <button onClick={() => onStartInterview(interviewMode)}
+                  className={`group flex items-center gap-2.5 px-7 py-3.5 rounded-full font-medium text-sm transition-all duration-300 hover:scale-[1.03] shrink-0
+                    ${interviewMode === 'pressure'
+                      ? 'bg-red-500 text-white hover:bg-red-400 shadow-[0_0_40px_rgba(239,68,68,0.2)]'
+                      : 'bg-white text-black hover:bg-zinc-100 shadow-[0_0_40px_rgba(255,255,255,0.1)]'
+                    }`}>
+                  {interviewMode === 'pressure' ? '🔥 Start Pressure Interview' : 'Start Interview'}
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         </div>

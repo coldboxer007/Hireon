@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppState, PrepData, ReportData, InterviewSnapshot } from './types';
+import { AppState, PrepData, ReportData, InterviewSnapshot, InterviewMode } from './types';
 import InputScreen from './components/InputScreen';
 import ResearchScreen from './components/ResearchScreen';
 import PrepPackScreen from './components/PrepPackScreen';
@@ -12,6 +12,7 @@ export default function App() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [jdFile, setJdFile] = useState<File | string | null>(null);
   const [prepData, setPrepData] = useState<PrepData | null>(null);
+  const [interviewMode, setInterviewMode] = useState<InterviewMode>('standard');
   const [interviewVideo, setInterviewVideo] = useState<Blob | null>(null);
   const [interviewTranscript, setInterviewTranscript] = useState<string>('');
   const [interviewSnapshots, setInterviewSnapshots] = useState<InterviewSnapshot[]>([]);
@@ -28,7 +29,8 @@ export default function App() {
     setAppState('PREP_PACK');
   };
 
-  const handleStartInterview = () => {
+  const handleStartInterview = (mode: InterviewMode) => {
+    setInterviewMode(mode);
     setAppState('MOCK_INTERVIEW');
   };
 
@@ -52,6 +54,7 @@ export default function App() {
     setInterviewVideo(null);
     setInterviewTranscript('');
     setInterviewSnapshots([]);
+    setInterviewMode('standard');
     setReportData(null);
   };
 
@@ -76,6 +79,7 @@ export default function App() {
       {appState === 'MOCK_INTERVIEW' && prepData && (
         <MockInterviewScreen 
           prepData={prepData}
+          interviewMode={interviewMode}
           onComplete={handleInterviewComplete} 
         />
       )}

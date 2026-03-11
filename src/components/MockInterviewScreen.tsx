@@ -4,7 +4,7 @@ import {
   Mic, MicOff, Video, VideoOff, Square,
   Send, Bot, User, Camera, Radio, Shield,
 } from 'lucide-react';
-import { PrepData, InterviewSnapshot } from '../types';
+import { PrepData, InterviewSnapshot, InterviewMode } from '../types';
 import { io, Socket } from 'socket.io-client';
 
 /* ── PCM <-> Base64 helpers ──────────────────────────────────────────────── */
@@ -34,6 +34,7 @@ const SONIC_SERVER_URL = process.env.SONIC_SERVER_URL || 'http://localhost:3001'
 
 interface MockInterviewScreenProps {
   prepData: PrepData;
+  interviewMode: InterviewMode;
   onComplete: (video: Blob, transcript: string, snapshots: InterviewSnapshot[]) => void;
 }
 
@@ -48,7 +49,7 @@ function nextMsgId() {
   return 'msg-' + (++msgIdCounter);
 }
 
-export default function MockInterviewScreen({ prepData, onComplete }: MockInterviewScreenProps) {
+export default function MockInterviewScreen({ prepData, interviewMode, onComplete }: MockInterviewScreenProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -218,15 +219,33 @@ export default function MockInterviewScreen({ prepData, onComplete }: MockInterv
     const socket = io(SONIC_SERVER_URL, { transports: ['websocket'], timeout: 15000 });
     socketRef.current = socket;
 
-    const systemPrompt =
-      'You are an expert technical interviewer conducting a mock interview for the role of ' + prepData.roleTitle + ' at ' + prepData.companyName + '. ' +
-      'The candidate strengths are: ' + (prepData.fitMap?.strengths?.join(', ') || 'not specified') + '. ' +
-      'Their gaps are: ' + (prepData.fitMap?.gaps?.join(', ') || 'not specified') + '. ' +
-      'Conduct a realistic interview. Start by briefly introducing yourself and asking your first question. ' +
-      'IMPORTANT: Ask only ONE question at a time and then WAIT for the candidate to respond before asking the next question. ' +
+    const baseContext =
+      'Role: ' + prepData.roleTitle + ' at ' + prepData.companyName + '. ' +
+      'Candidate strengths: ' + (prepData.fitMap?.strengths?.join(', ') || 'not specified') + '. ' +
+      'Candidate gaps: ' + (prepData.fitMap?.gaps?.join(', ') || 'not specified') + '. ' +
+      'Resume risks to probe: ' + (prepData.resumeRisks?.map(r => r.risk).join('; ') || 'none identified') + '. ' +
+      'Company-tailored questions to weave in: ' + (prepData.interviewerQuestions?.slice(0, 3).join('; ') || 'use your judgment') + '. ';
+
+    const standardInstructions =
+      'You are an expert interviewer conducting a realistic mock interview. ' +
+      'Start by briefly introducing yourself and asking your first question. ' +
+      'IMPORTANT: Ask only ONE question at a time and WAIT for the candidate to respond. ' +
       'Do NOT ask multiple questions at once. Listen to their answer, give brief feedback if appropriate, then ask the next question. ' +
+      'Weave in the company-tailored questions and gently probe the resume risks above. ' +
       'Keep your responses short — generally two or three sentences. ' +
-      'After 3-4 questions total, wrap up the interview by saying "Thank you, that concludes our interview."';
+      'After 3-4 questions total, wrap up by saying "Thank you, that concludes our interview."';
+
+    const pressureInstructions =
+      'You are a tough, senior interviewer known for aggressive, no-nonsense interviews. ' +
+      'Your style: direct, skeptical, push-back on vague answers, demand specifics with follow-ups. ' +
+      'Start with a brief cold introduction — no pleasantries — then immediately hit with a hard question. ' +
+      'IMPORTANT: Ask only ONE question at a time, but follow up aggressively if the answer is vague. ' +
+      'Actively probe the resume risks listed above — challenge job-hopping, missing metrics, skill gaps. ' +
+      'Use the company-tailored questions. If the candidate gives a generic answer, say "Be more specific" or "That doesn\'t answer my question." ' +
+      'Keep responses short and blunt — one or two sentences max. ' +
+      'After 4-5 questions total, wrap up by saying "Thank you, that concludes our interview."';
+
+    const systemPrompt = baseContext + (interviewMode === 'pressure' ? pressureInstructions : standardInstructions);
 
     socket.on('connect', () => { socket.emit('startSession', { systemPrompt }); });
     socket.on('connect_error', (err) => { setIsConnecting(false); setConnectionError('Cannot connect to Sonic server (' + err.message + ')'); });

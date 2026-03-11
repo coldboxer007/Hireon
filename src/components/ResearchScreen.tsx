@@ -49,6 +49,8 @@ export default function ResearchScreen({ resume, jd, onComplete }: ResearchScree
           2. Compare the candidate's resume to the job description to build a "Fit Map" (alignment score 0-100, top 3 strengths, top 3 gaps).
           3. Evaluate 5 key skills required for the role and score the candidate out of 100 for each.
           4. Generate a tailored interview plan for tomorrow.
+          5. **Resume Risk Detector**: Analyze the resume from an interviewer's perspective. Identify 3-5 things an interviewer might challenge or attack (e.g. job hopping, no measurable achievements, skills listed but not demonstrated, career gaps, vague descriptions, missing keywords from the JD). For each risk, provide a severity ("high", "medium", or "low") and a specific defense strategy the candidate should rehearse.
+          6. **Interviewer Brain**: Based on the company's culture, the specific job description requirements, and the candidate's weaknesses, generate 5 highly targeted interview questions that THIS specific company would likely ask THIS specific candidate. These should NOT be generic — they should reflect the company's values and the candidate's gaps.
 
           Return the result as a JSON object matching this schema:
           {
@@ -60,7 +62,9 @@ export default function ResearchScreen({ resume, jd, onComplete }: ResearchScree
               "gaps": ["string"],
               "skillsAnalysis": [{ "skill": "string", "score": number }]
             },
-            "interviewPlan": "string (markdown)"
+            "interviewPlan": "string (markdown)",
+            "resumeRisks": [{ "risk": "string", "severity": "high|medium|low", "defense": "string" }],
+            "interviewerQuestions": ["string"]
           }
         `;
 
@@ -128,7 +132,13 @@ export default function ResearchScreen({ resume, jd, onComplete }: ResearchScree
         }
 
         setTimeout(() => {
-          onComplete({ ...analysisData, companyInsights: researchData.companyInsights || 'No insights found.', sources: [] });
+          onComplete({
+            ...analysisData,
+            companyInsights: researchData.companyInsights || 'No insights found.',
+            resumeRisks: analysisData.resumeRisks || [],
+            interviewerQuestions: analysisData.interviewerQuestions || [],
+            sources: [],
+          });
         }, 1000);
 
       } catch (err: any) {

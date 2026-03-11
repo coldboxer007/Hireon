@@ -1,5 +1,13 @@
 export type AppState = 'INPUT' | 'RESEARCHING' | 'PREP_PACK' | 'MOCK_INTERVIEW' | 'ANALYZING' | 'REPORT';
 
+export type InterviewMode = 'standard' | 'pressure';
+
+export interface ResumeRisk {
+  risk: string;
+  severity: 'high' | 'medium' | 'low';
+  defense: string;
+}
+
 export interface PrepData {
   companyName: string;
   roleTitle: string;
@@ -11,6 +19,8 @@ export interface PrepData {
     skillsAnalysis: { skill: string; score: number }[];
   };
   interviewPlan: string;
+  resumeRisks: ResumeRisk[];
+  interviewerQuestions: string[];
   sources: string[];
 }
 
